@@ -222,7 +222,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
      advertisementData:(NSDictionary<NSString *,id> *)advertisementData
                   RSSI:(NSNumber *)RSSI
 {
-    NSLog(@"Discovered Peripheral %@ - %@", peripheral.identifier.UUIDString, peripheral.name);
+//    NSLog(@"Discovered Peripheral %@ - %@", peripheral.identifier.UUIDString, peripheral.name);
     
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp == nil) {
@@ -242,7 +242,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 
 -(void)peripheral:(CBPeripheral *)peripheral didDiscoverServices:(NSError *)error
 {
-    NSLog(@"Peripheral Discovered Services %@", peripheral.identifier.UUIDString);
+//    NSLog(@"Peripheral Discovered Services %@", peripheral.identifier.UUIDString);
     
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp != nil) {
