@@ -28,6 +28,11 @@ NSMutableDictionary* getPeripheralInfo(CBPeripheral* peripheral, NSDictionary* a
             [advertisementInfo setObject: txPowerLevel forKey:@"txPower"];
         }
         
+        NSNumber* localName = [advertisementData objectForKey:CBAdvertisementDataLocalNameKey];
+        if (localName != nil) {
+            [advertisementInfo setObject: localName forKey:@"localName"];
+        }
+        
         NSNumber* isConnectable = [advertisementData objectForKey:CBAdvertisementDataIsConnectable];
         if (isConnectable != nil) {
             [advertisementInfo setObject: isConnectable forKey:@"connectable"];
@@ -41,6 +46,35 @@ NSMutableDictionary* getPeripheralInfo(CBPeripheral* peripheral, NSDictionary* a
             }
             [advertisementInfo setObject: uuidsInfo forKey:@"UUIDS"];
         }
+        
+        NSArray* solicitedUuids = [advertisementData objectForKey:CBAdvertisementDataSolicitedServiceUUIDsKey];
+        if (solicitedUuids != nil) {
+            NSMutableArray* uuidsInfo = [[NSMutableArray alloc] init];
+            for(CBUUID* uuid in solicitedUuids) {
+                [uuidsInfo addObject: uuid.UUIDString];
+            }
+            [advertisementInfo setObject: uuidsInfo forKey:@"solicitedUUIDS"];
+        }
+        
+        NSArray* overflowUuids = [advertisementData objectForKey:CBAdvertisementDataOverflowServiceUUIDsKey];
+        if (overflowUuids != nil) {
+            NSMutableArray* uuidsInfo = [[NSMutableArray alloc] init];
+            for(CBUUID* uuid in overflowUuids) {
+                [uuidsInfo addObject: uuid.UUIDString];
+            }
+            [advertisementInfo setObject: uuidsInfo forKey:@"overflowUUIDS"];
+        }
+        
+        NSDictionary* serviceData = [advertisementData objectForKey:CBAdvertisementDataServiceDataKey];
+        if (serviceData != nil) {
+            NSMutableDictionary* serviceInfo = [[NSMutableDictionary alloc] init];
+            for (CBUUID* uuid in serviceData) {
+                NSData* data = [serviceData objectForKey:uuid];
+                [serviceInfo setObject: [data base64EncodedStringWithOptions:0] forKey:uuid.UUIDString];
+            }
+            [advertisementInfo setObject: serviceInfo forKey:@"serviceData"];
+        }
+        
         [info setObject:advertisementInfo forKey:@"advertisement"];
     }
     
@@ -146,7 +180,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 -(void)subscribeStateChange:(CDVInvokedUrlCommand*) command
 {
     self.stateChangeCallbackId = command.callbackId;
-
+    
     CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString: getCentralManagerStateName(centralManager.state)];
     [pluginResult setKeepCallbackAsBool:TRUE];
     [self.commandDelegate sendPluginResult: pluginResult callbackId: stateChangeCallbackId];
@@ -192,7 +226,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
     [centralManager scanForPeripheralsWithServices:services options:options];
     
     self.scanResultCallbackId = command.callbackId;
-
+    
     // Always callback
     CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsArray: nil];
     [pluginResult setKeepCallbackAsBool:TRUE];
@@ -222,7 +256,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
      advertisementData:(NSDictionary<NSString *,id> *)advertisementData
                   RSSI:(NSNumber *)RSSI
 {
-//    NSLog(@"Discovered Peripheral %@ - %@", peripheral.identifier.UUIDString, peripheral.name);
+    //    NSLog(@"Discovered Peripheral %@ - %@", peripheral.identifier.UUIDString, peripheral.name);
     
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp == nil) {
@@ -242,7 +276,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 
 -(void)peripheral:(CBPeripheral *)peripheral didDiscoverServices:(NSError *)error
 {
-//    NSLog(@"Peripheral Discovered Services %@", peripheral.identifier.UUIDString);
+    //    NSLog(@"Peripheral Discovered Services %@", peripheral.identifier.UUIDString);
     
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp != nil) {
