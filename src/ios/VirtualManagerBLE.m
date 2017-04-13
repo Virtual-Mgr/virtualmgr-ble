@@ -142,7 +142,9 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 @end
 
 
-@interface VirtualManagerBLE : CDVPlugin<CBCentralManagerDelegate, CBPeripheralDelegate> {
+// VMScanClient allows multiple JS clients to call startScanning, we will merge their requests to make it look
+// like
+@interface VMScanClient : NSObject<CBCentralManagerDelegate, CBPeripheralDelegate> {
     // To make JS bridge more efficient, rather than returning every scan result to JS individually the following
     // 2 fields allow results to be gathered and sent as a group of maximum "groupSize" and waiting no more than
     // "groupTimeout" milliseconds once 1 scan has been gathered before delivering to JS
@@ -151,35 +153,37 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
     bool _groupTimeoutScheduled;
 }
 
+@property (nonatomic, retain) id<CDVCommandDelegate> commandDelegate;
 @property (nonatomic, retain) NSMutableDictionary* peripherals;
 @property (nonatomic, retain) NSString* scanResultCallbackId;
 @property (nonatomic, retain) NSString* stateChangeCallbackId;
 @property (nonatomic, retain) CBCentralManager* centralManager;
 @property (nonatomic, retain) NSMutableArray* groupedScans;
 
-- (void)pluginInitialize;
-- (void)dispose;
-
 @end
 
 
-@implementation VirtualManagerBLE
+@implementation VMScanClient
 
 @synthesize peripherals, scanResultCallbackId, stateChangeCallbackId, centralManager;
 
--(void)pluginInitialize
+const int firstParameterOffset = 1;
+
+-(id)initWithCommandDelegate:(id<CDVCommandDelegate>)commandDelegate
 {
-    NSLog(@"pluginInitialize");
-    [super pluginInitialize];
-    
-    self.centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
-    self.peripherals = [[NSMutableDictionary alloc] init];
-    
-    // Default send all results immediately
-    self.groupedScans = nil;
-    _groupTimeout = 0;
-    _groupSize = 1;
-    _groupTimeoutScheduled = false;
+    NSLog(@"VMScanClient init");
+    if ((self = [super init])) {
+        self.commandDelegate = commandDelegate;
+        self.centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
+        self.peripherals = [[NSMutableDictionary alloc] init];
+        
+        // Default send all results immediately
+        self.groupedScans = nil;
+        _groupTimeout = 0;
+        _groupSize = 1;
+        _groupTimeoutScheduled = false;
+    }
+    return self;
 }
 
 -(void)dispose
@@ -188,14 +192,13 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
     self.centralManager = nil;
     self.peripherals = nil;
     self.groupedScans = nil;
-    [super dispose];
 }
 
 -(void)subscribeStateChange:(CDVInvokedUrlCommand*) command
 {
     self.stateChangeCallbackId = command.callbackId;
     
-    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString: getCentralManagerStateName(centralManager.state)];
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString: getCentralManagerStateName((CBCentralManagerState)centralManager.state)];
     [pluginResult setKeepCallbackAsBool:TRUE];
     [self.commandDelegate sendPluginResult: pluginResult callbackId: stateChangeCallbackId];
 }
@@ -225,12 +228,12 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
     NSMutableDictionary* options = [[NSMutableDictionary alloc] init];
     NSArray* services = nil;
     
-    if (command.arguments.count >= 1) {
-        services = [self getUUIDsFromStringArray:[command.arguments objectAtIndex:0]];
+    if (command.arguments.count >= firstParameterOffset + 1) {
+        services = [self getUUIDsFromStringArray:[command.arguments objectAtIndex: firstParameterOffset + 0]];
     }
     
-    if (command.arguments.count >= 2) {
-        NSDictionary* optionArg = [command.arguments objectAtIndex: 1];
+    if (command.arguments.count >= firstParameterOffset + 2) {
+        NSDictionary* optionArg = [command.arguments objectAtIndex: firstParameterOffset + 1];
         NSNumber* allowDuplicate = [optionArg objectForKey:@"allowDuplicate"];
         if (allowDuplicate && [allowDuplicate boolValue]) {
             [options setObject:allowDuplicate forKey:CBCentralManagerScanOptionAllowDuplicatesKey];
@@ -276,10 +279,10 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central
 {
-    NSLog(@"Central Manager Update State %@", getCentralManagerStateName(central.state));
+    NSLog(@"Central Manager Update State %@", getCentralManagerStateName((CBCentralManagerState)central.state));
     
     if (stateChangeCallbackId != nil) {
-        CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString: getCentralManagerStateName(central.state)];
+        CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString: getCentralManagerStateName((CBCentralManagerState)central.state)];
         [pluginResult setKeepCallbackAsBool:TRUE];
         [self.commandDelegate sendPluginResult: pluginResult callbackId: stateChangeCallbackId];
     }
@@ -347,12 +350,12 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
     NSString* peripheralId = nil;
     NSArray* services = nil;
     
-    if (command.arguments.count >= 1) {
-        peripheralId = [command.arguments objectAtIndex:0];
+    if (command.arguments.count >= firstParameterOffset + 1) {
+        peripheralId = [command.arguments objectAtIndex: firstParameterOffset + 0];
     }
     
-    if (command.arguments.count >= 2) {
-        services = [self getUUIDsFromStringArray:[command.arguments objectAtIndex:1]];
+    if (command.arguments.count >= firstParameterOffset + 2) {
+        services = [self getUUIDsFromStringArray:[command.arguments objectAtIndex: firstParameterOffset + 1]];
     }
     
     if (peripheralId == nil) {
@@ -370,3 +373,83 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 }
 
 @end
+
+
+
+@interface VirtualManagerBLE : CDVPlugin {
+}
+
+@property (nonatomic, retain) NSMutableDictionary* clients;
+
+- (void)pluginInitialize;
+- (void)dispose;
+
+@end
+
+
+@implementation VirtualManagerBLE
+
+-(void)pluginInitialize
+{
+    NSLog(@"pluginInitialize");
+    [super pluginInitialize];
+
+    self.clients = [[NSMutableDictionary alloc] init];
+}
+
+-(void)dispose
+{
+    NSLog(@"dispose");
+    self.clients = nil;
+    [super dispose];
+}
+
+-(VMScanClient*)getClientFromCommand:(CDVInvokedUrlCommand*) command
+{
+    // 1st parameter will be the clientId
+    NSString* clientId = nil;
+    if (command.arguments.count >= 1) {
+        clientId = [command.arguments objectAtIndex:0];
+    }
+
+    // Find or create a new client ..
+    VMScanClient* client = [_clients objectForKey:clientId];
+    if (client == nil) {
+        client = [[VMScanClient alloc] initWithCommandDelegate: self.commandDelegate];
+        [_clients setObject:client forKey:clientId];
+    }
+    return client;
+}
+
+-(void)clientSubscribeStateChange:(CDVInvokedUrlCommand*) command
+{
+    VMScanClient* client = [self getClientFromCommand:command];
+    [client subscribeStateChange:command];
+}
+
+-(void)clientUnsubscribeStateChange:(CDVInvokedUrlCommand*) command
+{
+    VMScanClient* client = [self getClientFromCommand:command];
+    [client unsubscribeStateChange:command];
+}
+
+-(void)clientStartScanning:(CDVInvokedUrlCommand*) command
+{
+    VMScanClient* client = [self getClientFromCommand:command];
+    [client startScanning:command];
+}
+
+-(void)clientStopScanning:(CDVInvokedUrlCommand*) command
+{
+    VMScanClient* client = [self getClientFromCommand:command];
+    [client stopScanning:command];
+}
+
+-(void)clientPeripheral_getServices:(CDVInvokedUrlCommand*) command
+{
+    VMScanClient* client = [self getClientFromCommand:command];
+    [client peripheral_getServices:command];
+}
+
+@end
+
