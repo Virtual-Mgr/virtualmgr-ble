@@ -143,12 +143,19 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 
 
 @interface VirtualManagerBLE : CDVPlugin<CBCentralManagerDelegate, CBPeripheralDelegate> {
+    // To make JS bridge more efficient, rather than returning every scan result to JS individually the following
+    // 2 fields allow results to be gathered and sent as a group of maximum "groupSize" and waiting no more than
+    // "groupTimeout" milliseconds once 1 scan has been gathered before delivering to JS
+    NSInteger _groupSize;
+    NSTimeInterval _groupTimeout;
+    bool _groupTimeoutScheduled;
 }
 
 @property (nonatomic, retain) NSMutableDictionary* peripherals;
 @property (nonatomic, retain) NSString* scanResultCallbackId;
 @property (nonatomic, retain) NSString* stateChangeCallbackId;
 @property (nonatomic, retain) CBCentralManager* centralManager;
+@property (nonatomic, retain) NSMutableArray* groupedScans;
 
 - (void)pluginInitialize;
 - (void)dispose;
@@ -167,6 +174,12 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
     
     self.centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
     self.peripherals = [[NSMutableDictionary alloc] init];
+    
+    // Default send all results immediately
+    self.groupedScans = nil;
+    _groupTimeout = 0;
+    _groupSize = 1;
+    _groupTimeoutScheduled = false;
 }
 
 -(void)dispose
@@ -174,6 +187,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
     NSLog(@"dispose");
     self.centralManager = nil;
     self.peripherals = nil;
+    self.groupedScans = nil;
     [super dispose];
 }
 
@@ -221,6 +235,26 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
         if (allowDuplicate && [allowDuplicate boolValue]) {
             [options setObject:allowDuplicate forKey:CBCentralManagerScanOptionAllowDuplicatesKey];
         }
+
+        NSNumber* groupTimeout = [optionArg objectForKey:@"groupTimeout"];
+        if (groupTimeout) {
+            _groupTimeout = [groupTimeout integerValue] / 1000.0;
+        }
+
+        // To make JS bridge more efficient - Group scan results to no more than
+        NSNumber* groupSize = [optionArg objectForKey:@"groupSize"];
+        if (groupSize) {
+            _groupSize = [groupSize integerValue];
+        }
+    }
+    
+    if (_groupTimeout < 0.0) {
+        _groupTimeout = 0.0;
+    }
+    
+    // GroupSize of 0 = ignore groupSize and just use groupTimeout
+    if (_groupSize < 0) {
+        _groupSize = 0;
     }
     
     [centralManager scanForPeripheralsWithServices:services options:options];
@@ -251,6 +285,18 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
     }
 }
 
+- (void)sendGroupScans
+{
+    if (_groupedScans != nil) {
+        CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsArray: _groupedScans];
+        [pluginResult setKeepCallbackAsBool:TRUE];
+        [self.commandDelegate sendPluginResult: pluginResult callbackId: scanResultCallbackId];
+    }
+    // release the group now it is sent
+    self.groupedScans = nil;
+    _groupTimeoutScheduled = false;
+}
+
 - (void)centralManager:(CBCentralManager *)central
  didDiscoverPeripheral:(CBPeripheral *)peripheral
      advertisementData:(NSDictionary<NSString *,id> *)advertisementData
@@ -266,12 +312,19 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
     peripheral.delegate = self;
     
     NSMutableDictionary* info = getPeripheralInfo(peripheral, advertisementData, RSSI);
-    NSMutableArray* list = [[NSMutableArray alloc] initWithObjects:info, nil];
-    
-    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsArray: list];
-    [pluginResult setKeepCallbackAsBool:TRUE];
-    [self.commandDelegate sendPluginResult: pluginResult callbackId: scanResultCallbackId];
-    
+    if (_groupedScans == nil) {
+        _groupedScans = [[NSMutableArray alloc] initWithObjects:info, nil];
+    } else {
+        [_groupedScans addObject:info];
+    }
+
+    // Note, groupSize of 0 means we ignore groupSize and send on groupTimeouts only
+    if (_groupSize >= 1 && ([_groupedScans count] >= _groupSize)) {
+        [self sendGroupScans];
+    } else if (!_groupTimeoutScheduled) {
+        _groupTimeoutScheduled = true;
+        [self performSelector:@selector(sendGroupScans) withObject:nil afterDelay:_groupTimeout];
+    } // else a timeout is already scheduled
 }
 
 -(void)peripheral:(CBPeripheral *)peripheral didDiscoverServices:(NSError *)error
