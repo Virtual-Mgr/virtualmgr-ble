@@ -153,6 +153,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
     bool _groupTimeoutScheduled;
 }
 
+@property (nonatomic, retain) NSString* clientId;
 @property (nonatomic, retain) id<CDVCommandDelegate> commandDelegate;
 @property (nonatomic, retain) NSMutableDictionary* peripherals;
 @property (nonatomic, retain) NSString* scanResultCallbackId;
@@ -169,10 +170,11 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 
 const int firstParameterOffset = 1;
 
--(id)initWithCommandDelegate:(id<CDVCommandDelegate>)commandDelegate
+-(id)initClientId:(NSString*) clientId withCommandDelegate:(id<CDVCommandDelegate>)commandDelegate
 {
-    NSLog(@"VMScanClient init");
     if ((self = [super init])) {
+        NSLog(@"VMScanClient initClientId: %@", clientId);
+        self.clientId = clientId;
         self.commandDelegate = commandDelegate;
         self.centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
         self.peripherals = [[NSMutableDictionary alloc] init];
@@ -188,7 +190,6 @@ const int firstParameterOffset = 1;
 
 -(void)dispose
 {
-    NSLog(@"dispose");
     self.centralManager = nil;
     self.peripherals = nil;
     self.groupedScans = nil;
@@ -224,7 +225,7 @@ const int firstParameterOffset = 1;
 
 -(void)startScanning:(CDVInvokedUrlCommand*) command
 {
-    NSLog(@"StartScanning %@", command);
+    NSLog(@"VMScanClient: %@ StartScanning %@", _clientId, command);
     NSMutableDictionary* options = [[NSMutableDictionary alloc] init];
     NSArray* services = nil;
     
@@ -279,7 +280,7 @@ const int firstParameterOffset = 1;
 
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central
 {
-    NSLog(@"Central Manager Update State %@", getCentralManagerStateName((CBCentralManagerState)central.state));
+    NSLog(@"VMScanClient:%@ Central Manager Update State %@", _clientId, getCentralManagerStateName((CBCentralManagerState)central.state));
     
     if (stateChangeCallbackId != nil) {
         CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString: getCentralManagerStateName((CBCentralManagerState)central.state)];
@@ -415,7 +416,7 @@ const int firstParameterOffset = 1;
     // Find or create a new client ..
     VMScanClient* client = [_clients objectForKey:clientId];
     if (client == nil) {
-        client = [[VMScanClient alloc] initWithCommandDelegate: self.commandDelegate];
+        client = [[VMScanClient alloc] initClientId: clientId withCommandDelegate: self.commandDelegate];
         [_clients setObject:client forKey:clientId];
     }
     return client;
