@@ -9,9 +9,6 @@ NSMutableDictionary* getCharacteristicInfo(CBCharacteristic* characteristic)
     
     [info setObject: characteristic.UUID.UUIDString forKey: @"uuid"];
     [info setObject: [NSNumber numberWithUnsignedInteger: characteristic.properties] forKey: @"properties"];
-    if (characteristic.value != nil) {
-        [info setObject: [characteristic.value base64EncodedDataWithOptions:0] forKey: @"value"];
-    }
     return info;
 }
 
@@ -362,6 +359,7 @@ const int firstParameterOffset = 1;
     CDVPluginResult* pluginResult = nil;
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp != nil) {
+        NSLog(@"BLE Connected %@", vmp.peripheral.identifier.UUIDString);
         pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString:@"connect"];
         [pluginResult setKeepCallbackAsBool:TRUE];
         [self.commandDelegate sendPluginResult: pluginResult callbackId: [vmp callbackIdForKey:@"connect" remove:false]];
@@ -373,6 +371,7 @@ const int firstParameterOffset = 1;
     CDVPluginResult* pluginResult = nil;
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp != nil) {
+        NSLog(@"BLE Disconnected %@ %@", vmp.peripheral.identifier.UUIDString, error.description);
         pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString:@"disconnect"];
         [pluginResult setKeepCallbackAsBool:FALSE];     // We can get rid of this now
         [self.commandDelegate sendPluginResult: pluginResult callbackId: [vmp callbackIdForKey:@"connect" remove:true]];
@@ -384,6 +383,7 @@ const int firstParameterOffset = 1;
     CDVPluginResult* pluginResult = nil;
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp != nil) {
+        NSLog(@"BLE Connect Failed %@ %@", vmp.peripheral.identifier.UUIDString, error.description);
         pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: error.description];
         [pluginResult setKeepCallbackAsBool:FALSE];     // We can get rid of this now
         [self.commandDelegate sendPluginResult: pluginResult callbackId: [vmp callbackIdForKey:@"connect" remove:true]];
@@ -427,6 +427,8 @@ const int firstParameterOffset = 1;
         } 
 
         if (pluginResult == nil) {
+            NSLog(@"BLE Connect %@", vmp.peripheral.identifier.UUIDString);
+
             [vmp setCallbackId:command.callbackId forKey:@"connect"];
             [centralManager connectPeripheral:vmp.peripheral options:options];
         }
@@ -463,6 +465,8 @@ const int firstParameterOffset = 1;
             // the requested Disconnect will call the clients disconnect(success) method
             // a spurious Disconnect will call the clients connect(success) method with "disconnect" as parameter
 
+            NSLog(@"BLE Disconnect %@", vmp.peripheral.identifier.UUIDString);
+            
             [vmp setCallbackId:command.callbackId forKey:@"connect"];
             [centralManager cancelPeripheralConnection:vmp.peripheral];
         }
@@ -704,13 +708,30 @@ const int firstParameterOffset = 1;
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp != nil) {
         NSString* callbackKey = [@"readCharacteristic:" stringByAppendingString:characteristic.UUID.UUIDString];
+        bool isNotifying = [characteristic isNotifying];
+        
+        NSString* callback = [vmp callbackIdForKey:callbackKey remove:!isNotifying];
         if (error == nil) {
             pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsArrayBuffer:characteristic.value];
         } else {
             pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString:error.description];
         }
-        [pluginResult setKeepCallbackAsBool:TRUE];
-        [self.commandDelegate sendPluginResult: pluginResult callbackId: [vmp callbackIdForKey:callbackKey remove:false]];
+        
+        NSLog(@"characteristicReadValue: %@ isNotifying %d", characteristic.UUID.UUIDString, isNotifying);
+
+        [pluginResult setKeepCallbackAsBool: isNotifying];
+        [self.commandDelegate sendPluginResult: pluginResult callbackId: callback];
+    }
+}
+
+-(void)peripheral:(CBPeripheral *)peripheral didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error
+{
+    NSLog(@"characteristicSetNotify: %@", characteristic.UUID.UUIDString);
+    VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
+    if (vmp != nil) {
+        // This callback is as a result of [characteristicRead] where we [setNotifyValue] first, so we can
+        // read the characteristic as originall requested
+        [vmp.peripheral readValueForCharacteristic:characteristic];
     }
 }
 
@@ -720,6 +741,7 @@ const int firstParameterOffset = 1;
     NSString* peripheralId = nil;
     CBUUID* serviceUUID = nil;
     CBUUID* characteristicUUID = nil;
+    bool enableNotify = false;
     
     if (command.arguments.count >= firstParameterOffset + 1) {
         peripheralId = [command.arguments objectAtIndex: firstParameterOffset + 0];
@@ -733,9 +755,15 @@ const int firstParameterOffset = 1;
         characteristicUUID = [CBUUID UUIDWithString: [command.arguments objectAtIndex: firstParameterOffset + 2]];
     }
     
+    if (command.arguments.count >= firstParameterOffset + 4) {
+        enableNotify = [[command.arguments objectAtIndex: firstParameterOffset + 3] boolValue];
+    }
+    
     if (peripheralId == nil) {
         pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Missing argument 'peripheralId'"];
     }
+
+    NSLog(@"characteristicRead: %@ notify %d", characteristicUUID.UUIDString, enableNotify);
 
     if (pluginResult == nil) {
         VMPeripheral* vmp = [peripherals objectForKey:peripheralId];
@@ -771,8 +799,12 @@ const int firstParameterOffset = 1;
         
         if (pluginResult == nil) {
             [vmp setCallbackId:command.callbackId forKey:[@"readCharacteristic:" stringByAppendingString:characteristic.UUID.UUIDString]];
-
-            [vmp.peripheral readValueForCharacteristic:characteristic];
+            
+            if ([characteristic isNotifying] != enableNotify) {
+                [vmp.peripheral setNotifyValue:enableNotify forCharacteristic:characteristic];
+            } else {
+                [vmp.peripheral readValueForCharacteristic:characteristic];
+            }
         }
     }
     

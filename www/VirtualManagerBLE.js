@@ -9,6 +9,7 @@ function Characteristic(characteristicInfo, service) {
 }
 
 Characteristic.prototype.write = function(data, success, error) {
+	var self = this;
 	if (data instanceof Array) {
         // assuming array of integer
         data = new Uint8Array(data).buffer;
@@ -17,22 +18,42 @@ Characteristic.prototype.write = function(data, success, error) {
     }
 
     // !!success is true if success function is defined, and indicates a response to the write is required
-	var service = this.service();
+	var service = self.service();
 	var peripheral = service.peripheral();
 	var client = peripheral.client();
-	exec(success, error, _module, "characteristicWrite", [client.id, peripheral.id, service.uuid, this.uuid, data, !!success]);
+	exec(success, error, _module, "characteristicWrite", [client.id, peripheral.id, service.uuid, self.uuid, data, !!success]);
 }
 
-Characteristic.prototype.read = function(success, error) {
+Characteristic.prototype.read = function(notify, success, error) {
+	if (typeof(notify) === 'function') {
+		error = success;
+		success = notify;
+		notify = false; 
+	}
 	var self = this;
-	var service = this.service();
+	var service = self.service();
 	var peripheral = service.peripheral();
 	var client = peripheral.client();
+
 	exec(function(value) {
 		value = new Uint8Array(value);
 		self.lastRead = value;
-		success(value);
-	}, error, _module, "characteristicRead", [client.id, peripheral.id, service.uuid, this.uuid]);
+
+		if (success) {
+			success(value);
+		}
+	}, error, _module, "characteristicRead", [client.id, peripheral.id, service.uuid, self.uuid, !!notify]);
+
+	if (notify) {
+		// Return a function which when called will cancel the Notify Read
+		return function(success, error) {
+			exec(function(value) {
+				if (success) {
+					success(value);
+				}
+			}, error, _module, "characteristicRead", [client.id, peripheral.id, service.uuid, self.uuid, false]);
+		}
+	}
 }
 
 function Service(uuid, peripheral) {
@@ -56,7 +77,9 @@ Service.prototype.discoverCharacteristics = function(characteristicUUIDs, succes
 			}
 			characteristics.push(characteristic);
 		});
-		success(characteristics);
+		if (success) {
+			success(characteristics);
+		}
 	}, error, _module, "serviceDiscoverCharacteristics", [client.id, peripheral.id, characteristicUUIDs, self.uuid]);
 }
 
@@ -81,8 +104,10 @@ Peripheral.prototype.discoverServices = function(serviceUUIDs, success, error) {
 			}
 			services.push(service);
 		});
-		success(services);
-	}, error, _module, "peripheralDiscoverServices", [client.id, this.id, serviceUUIDs]);
+		if (success) {
+			success(services);
+		}
+	}, error, _module, "peripheralDiscoverServices", [client.id, self.id, serviceUUIDs]);
 }
 
 Peripheral.prototype.connect = function(success, error) {
@@ -94,8 +119,10 @@ Peripheral.prototype.connect = function(success, error) {
 		} else if (msg == 'disconnect') {
 			self.connected = false;
 		}
-		success(msg);
-	}, error, _module, "peripheralConnect", [client.id, this.id]);
+		if (success) {
+			success(msg);
+		}
+	}, error, _module, "peripheralConnect", [client.id, self.id]);
 }
 
 Peripheral.prototype.disconnect = function(success, error) {
@@ -103,7 +130,10 @@ Peripheral.prototype.disconnect = function(success, error) {
 	var client = this.client();
 	exec(function() {
 		self.connected = false;
-	}, error, _module, "peripheralDisconnect", [client.id, this.id]);
+		if (success) {
+			success();
+		}
+	}, error, _module, "peripheralDisconnect", [client.id, self.id]);
 }
 
 function Client(id) {
@@ -127,11 +157,13 @@ Client.prototype.startScanning = function (serviceUUIDs, options, success, error
 				}
 				peripherals.push(peripheral);
 			})
-			success(peripherals);
-		} else {
+			if (success) {
+				success(peripherals);
+			}
+		} else if (success) {
 			success(scanResult);
 		}
-	}, error, _module, "clientStartScanning", [this.id, serviceUUIDs, options]);
+	}, error, _module, "clientStartScanning", [self.id, serviceUUIDs, options]);
 }
 
 Client.prototype.stopScanning = function (success, error) {
