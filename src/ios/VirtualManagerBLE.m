@@ -3,6 +3,9 @@
 #import <Cordova/CDV.h>
 #import <CoreBluetooth/CoreBluetooth.h>
 
+//#define DEBUGLOG(fmt, ...) NSLog(fmt, ##__VA_ARGS__)
+#define DEBUGLOG(x)
+
 NSMutableDictionary* getCharacteristicInfo(CBCharacteristic* characteristic)
 {
     NSMutableDictionary* info = [[NSMutableDictionary alloc] init];
@@ -190,16 +193,16 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 
 @implementation VMScanClient
 
-@synthesize peripherals, scanResultCallbackId, stateChangeCallbackId, centralManager;
+@synthesize clientId, commandDelegate, peripherals, scanResultCallbackId, stateChangeCallbackId, centralManager, groupedScans;
 
 const int firstParameterOffset = 1;
 
--(id)initClientId:(NSString*) clientId withCommandDelegate:(id<CDVCommandDelegate>)commandDelegate
+-(id)initClientId:(NSString*) theClientId withCommandDelegate:(id<CDVCommandDelegate>)theCommandDelegate
 {
     if ((self = [super init])) {
-        NSLog(@"VMScanClient initClientId: %@", clientId);
-        self.clientId = clientId;
-        self.commandDelegate = commandDelegate;
+        DEBUGLOG(@"VMScanClient initClientId: %@", theClientId);
+        self.clientId = theClientId;
+        self.commandDelegate = theCommandDelegate;
         self.centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
         self.peripherals = [[NSMutableDictionary alloc] init];
         
@@ -221,15 +224,18 @@ const int firstParameterOffset = 1;
 
 -(void)subscribeStateChange:(CDVInvokedUrlCommand*) command
 {
+    NSString* state = getCentralManagerStateName((CBCentralManagerState)centralManager.state);
+    DEBUGLOG(@"subscribeStageChange %@ currently %@", clientId, state);
     self.stateChangeCallbackId = command.callbackId;
     
-    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString: getCentralManagerStateName((CBCentralManagerState)centralManager.state)];
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString: state];
     [pluginResult setKeepCallbackAsBool:TRUE];
     [self.commandDelegate sendPluginResult: pluginResult callbackId: stateChangeCallbackId];
 }
 
 -(void)unsubscribeStateChange:(CDVInvokedUrlCommand*) command
 {
+    DEBUGLOG(@"unsubscribeStageChange %@", clientId);
     self.stateChangeCallbackId = nil;
 }
 
@@ -249,7 +255,7 @@ const int firstParameterOffset = 1;
 
 -(void)startScanning:(CDVInvokedUrlCommand*) command
 {
-    NSLog(@"VMScanClient: %@ StartScanning %@", _clientId, command);
+    DEBUGLOG(@"VMScanClient: %@ StartScanning %@", clientId, command);
     NSMutableDictionary* options = [[NSMutableDictionary alloc] init];
     NSArray* services = nil;
     
@@ -297,6 +303,7 @@ const int firstParameterOffset = 1;
 
 -(void)stopScanning:(CDVInvokedUrlCommand*) command
 {
+    DEBUGLOG(@"stopScanning %@", clientId);
     [centralManager stopScan];
     CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK];
     [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];
@@ -304,10 +311,11 @@ const int firstParameterOffset = 1;
 
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central
 {
-    NSLog(@"VMScanClient:%@ Central Manager Update State %@", _clientId, getCentralManagerStateName((CBCentralManagerState)central.state));
+    NSString* state = getCentralManagerStateName((CBCentralManagerState)central.state);
+    DEBUGLOG(@"VMScanClient:%@ Central Manager Update State %@", clientId, state);
     
     if (stateChangeCallbackId != nil) {
-        CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString: getCentralManagerStateName((CBCentralManagerState)central.state)];
+        CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString: state];
         [pluginResult setKeepCallbackAsBool:TRUE];
         [self.commandDelegate sendPluginResult: pluginResult callbackId: stateChangeCallbackId];
     }
@@ -315,8 +323,8 @@ const int firstParameterOffset = 1;
 
 - (void)sendGroupScans
 {
-    if (_groupedScans != nil) {
-        CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsArray: _groupedScans];
+    if (groupedScans != nil) {
+        CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsArray: groupedScans];
         [pluginResult setKeepCallbackAsBool:TRUE];
         [self.commandDelegate sendPluginResult: pluginResult callbackId: scanResultCallbackId];
     }
@@ -338,14 +346,14 @@ const int firstParameterOffset = 1;
     peripheral.delegate = self;
     
     NSMutableDictionary* info = getPeripheralInfo(peripheral, advertisementData, RSSI);
-    if (_groupedScans == nil) {
-        _groupedScans = [[NSMutableArray alloc] initWithObjects:info, nil];
+    if (groupedScans == nil) {
+        groupedScans = [[NSMutableArray alloc] initWithObjects:info, nil];
     } else {
-        [_groupedScans addObject:info];
+        [groupedScans addObject:info];
     }
 
     // Note, groupSize of 0 means we ignore groupSize and send on groupTimeouts only
-    if (_groupSize >= 1 && ([_groupedScans count] >= _groupSize)) {
+    if (_groupSize >= 1 && ([groupedScans count] >= _groupSize)) {
         [self sendGroupScans];
 
     } else if (!_groupTimeoutScheduled) {
@@ -359,7 +367,7 @@ const int firstParameterOffset = 1;
     CDVPluginResult* pluginResult = nil;
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp != nil) {
-        NSLog(@"BLE Connected %@", vmp.peripheral.identifier.UUIDString);
+        DEBUGLOG(@"BLE Connected %@", vmp.peripheral.identifier.UUIDString);
         pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString:@"connect"];
         [pluginResult setKeepCallbackAsBool:TRUE];
         [self.commandDelegate sendPluginResult: pluginResult callbackId: [vmp callbackIdForKey:@"connect" remove:false]];
@@ -371,7 +379,7 @@ const int firstParameterOffset = 1;
     CDVPluginResult* pluginResult = nil;
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp != nil) {
-        NSLog(@"BLE Disconnected %@ %@", vmp.peripheral.identifier.UUIDString, error.description);
+        DEBUGLOG(@"BLE Disconnected %@ %@", vmp.peripheral.identifier.UUIDString, error.description);
         pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString:@"disconnect"];
         [pluginResult setKeepCallbackAsBool:FALSE];     // We can get rid of this now
         [self.commandDelegate sendPluginResult: pluginResult callbackId: [vmp callbackIdForKey:@"connect" remove:true]];
@@ -383,7 +391,7 @@ const int firstParameterOffset = 1;
     CDVPluginResult* pluginResult = nil;
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp != nil) {
-        NSLog(@"BLE Connect Failed %@ %@", vmp.peripheral.identifier.UUIDString, error.description);
+        DEBUGLOG(@"BLE Connect Failed %@ %@", vmp.peripheral.identifier.UUIDString, error.description);
         pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: error.description];
         [pluginResult setKeepCallbackAsBool:FALSE];     // We can get rid of this now
         [self.commandDelegate sendPluginResult: pluginResult callbackId: [vmp callbackIdForKey:@"connect" remove:true]];
@@ -427,7 +435,7 @@ const int firstParameterOffset = 1;
         } 
 
         if (pluginResult == nil) {
-            NSLog(@"BLE Connect %@", vmp.peripheral.identifier.UUIDString);
+            DEBUGLOG(@"BLE Connect %@", vmp.peripheral.identifier.UUIDString);
 
             [vmp setCallbackId:command.callbackId forKey:@"connect"];
             [centralManager connectPeripheral:vmp.peripheral options:options];
@@ -465,7 +473,7 @@ const int firstParameterOffset = 1;
             // the requested Disconnect will call the clients disconnect(success) method
             // a spurious Disconnect will call the clients connect(success) method with "disconnect" as parameter
 
-            NSLog(@"BLE Disconnect %@", vmp.peripheral.identifier.UUIDString);
+            DEBUGLOG(@"BLE Disconnect %@", vmp.peripheral.identifier.UUIDString);
             
             [vmp setCallbackId:command.callbackId forKey:@"connect"];
             [centralManager cancelPeripheralConnection:vmp.peripheral];
@@ -693,6 +701,7 @@ const int firstParameterOffset = 1;
         if (pluginResult == nil) {
             [vmp setCallbackId:command.callbackId forKey:[@"writeCharacteristic:" stringByAppendingString:characteristic.UUID.UUIDString]];
 
+            DEBUGLOG(@"characteristicWrite: %@ %@", clientId, characteristic.UUID.UUIDString);
             [vmp.peripheral writeValue: data forCharacteristic: characteristic type: writeType];
         }
     }
@@ -717,7 +726,7 @@ const int firstParameterOffset = 1;
             pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString:error.description];
         }
         
-        NSLog(@"characteristicReadValue: %@ isNotifying %d", characteristic.UUID.UUIDString, isNotifying);
+        DEBUGLOG(@"characteristicReadValue: %@ %@ isNotifying %d", clientId, characteristic.UUID.UUIDString, isNotifying);
 
         [pluginResult setKeepCallbackAsBool: isNotifying];
         [self.commandDelegate sendPluginResult: pluginResult callbackId: callback];
@@ -726,7 +735,7 @@ const int firstParameterOffset = 1;
 
 -(void)peripheral:(CBPeripheral *)peripheral didUpdateNotificationStateForCharacteristic:(CBCharacteristic *)characteristic error:(NSError *)error
 {
-    NSLog(@"characteristicSetNotify: %@", characteristic.UUID.UUIDString);
+    DEBUGLOG(@"characteristicSetNotify: %@ %@", clientId, characteristic.UUID.UUIDString);
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp != nil) {
         // This callback is as a result of [characteristicRead] where we [setNotifyValue] first, so we can
@@ -763,7 +772,7 @@ const int firstParameterOffset = 1;
         pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Missing argument 'peripheralId'"];
     }
 
-    NSLog(@"characteristicRead: %@ notify %d", characteristicUUID.UUIDString, enableNotify);
+    DEBUGLOG(@"characteristicRead: %@ %@ notify %d", clientId, characteristicUUID.UUIDString, enableNotify);
 
     if (pluginResult == nil) {
         VMPeripheral* vmp = [peripherals objectForKey:peripheralId];
@@ -833,7 +842,7 @@ const int firstParameterOffset = 1;
 
 -(void)pluginInitialize
 {
-    NSLog(@"pluginInitialize");
+    DEBUGLOG(@"pluginInitialize");
     [super pluginInitialize];
 
     self.clients = [[NSMutableDictionary alloc] init];
@@ -841,7 +850,7 @@ const int firstParameterOffset = 1;
 
 -(void)dispose
 {
-    NSLog(@"dispose");
+    DEBUGLOG(@"dispose");
     self.clients = nil;
     [super dispose];
 }
