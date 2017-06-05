@@ -4,7 +4,7 @@
 #import <CoreBluetooth/CoreBluetooth.h>
 
 //#define DEBUGLOG(fmt, ...) NSLog(fmt, ##__VA_ARGS__)
-#define DEBUGLOG(x)
+#define DEBUGLOG(x, ...)
 
 NSMutableDictionary* getCharacteristicInfo(CBCharacteristic* characteristic)
 {
