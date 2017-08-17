@@ -1,0 +1,22 @@
+{
+  "name": "virtualmgrble",
+  "version": "1.1.0",
+  "description": "Virtual Manager BLE plugin",
+  "cordova": {
+    "id": "com.virtualmgr.cordova.ble",
+    "platforms": [
+      "ios"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://stevef51@bitbucket.org/stevef51/virtualmgrble.git"
+  },
+  "keywords": [
+    "ecosystem:cordova",
+    "cordova-ios"
+  ],
+  "author": "Steve Fillingham",
+  "license": "ISC",
+  "homepage": "https://bitbucket.org/stevef51/virtualmgrble#readme"
+}
