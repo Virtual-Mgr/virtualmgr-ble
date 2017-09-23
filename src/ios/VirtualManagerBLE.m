@@ -187,7 +187,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 @property (nonatomic, retain) NSString* stateChangeCallbackId;
 @property (nonatomic, retain) CBCentralManager* centralManager;
 @property (nonatomic, retain) NSMutableArray* groupedScans;
-
+@property (nonatomic, retain) NSMutableSet* blackedlistedUUIDs;
 @end
 
 
@@ -205,6 +205,7 @@ const int firstParameterOffset = 1;
         self.commandDelegate = theCommandDelegate;
         self.centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
         self.peripherals = [[NSMutableDictionary alloc] init];
+        self.blackedlistedUUIDs = [[NSMutableSet alloc] init];
         
         // Default send all results immediately
         self.groupedScans = nil;
@@ -220,6 +221,7 @@ const int firstParameterOffset = 1;
     self.centralManager = nil;
     self.peripherals = nil;
     self.groupedScans = nil;
+    self.blackedlistedUUIDs = nil;
 }
 
 -(void)subscribeStateChange:(CDVInvokedUrlCommand*) command
@@ -338,11 +340,19 @@ const int firstParameterOffset = 1;
      advertisementData:(NSDictionary<NSString *,id> *)advertisementData
                   RSSI:(NSNumber *)RSSI
 {
-    VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
+    // Check blacklist, ignore it if found
+    NSString* uuid = peripheral.identifier.UUIDString;
+    VMPeripheral* vmp = [peripherals objectForKey:uuid];
+    if ([_blackedlistedUUIDs containsObject:uuid]) {
+        if (vmp != nil) {
+            [peripherals removeObjectForKey:uuid];
+        }
+        return;
+    }
     if (vmp == nil) {
         vmp = [[VMPeripheral alloc] initWithPeripheral:peripheral];
+        [peripherals setObject:vmp forKey:uuid];
     }
-    [peripherals setObject:vmp forKey:peripheral.identifier.UUIDString];
     peripheral.delegate = self;
     
     NSMutableDictionary* info = getPeripheralInfo(peripheral, advertisementData, RSSI);
@@ -426,13 +436,13 @@ const int firstParameterOffset = 1;
     
     if (peripheralId == nil) {
         pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Missing argument 'peripheralId'"];
-    } 
+    }
 
     if (pluginResult == nil) {
         VMPeripheral* vmp = [peripherals objectForKey:peripheralId];
         if (vmp == nil) {
             pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Peripheral not found"];
-        } 
+        }
 
         if (pluginResult == nil) {
             DEBUGLOG(@"BLE Connect %@", vmp.peripheral.identifier.UUIDString);
@@ -458,14 +468,14 @@ const int firstParameterOffset = 1;
     
     if (peripheralId == nil) {
         pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Missing argument 'peripheralId'"];
-    } 
+    }
 
     if (pluginResult == nil) {
         VMPeripheral* vmp = [peripherals objectForKey:peripheralId];
 
         if (vmp == nil) {
             pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Peripheral not found"];
-        } 
+        }
 
         if (pluginResult == nil) {
             // Yes we alter the connectCallback - this
@@ -524,7 +534,7 @@ const int firstParameterOffset = 1;
         VMPeripheral* vmp = [peripherals objectForKey:peripheralId];
         if (vmp == nil) {
             pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Peripheral not found"];
-        } 
+        }
 
         if (pluginResult == nil) {
             [vmp setCallbackId:command.callbackId forKey:@"discoverServices"];
@@ -820,7 +830,28 @@ const int firstParameterOffset = 1;
     if (pluginResult != nil) {
         [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];
     }
+}
 
+-(void)blacklistUUIDs:(CDVInvokedUrlCommand*) command
+{
+    CDVPluginResult* pluginResult = nil;
+    NSArray* uuids = nil;
+    
+    if (command.arguments.count >= firstParameterOffset + 1) {
+        uuids = [command.arguments objectAtIndex: firstParameterOffset + 0];
+    }
+
+    if (uuids == nil) {
+        pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Missing argument 'UUIDs'"];
+    } else {
+        [_blackedlistedUUIDs addObjectsFromArray:uuids];
+    }
+    
+    if (pluginResult == nil) {
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+    }
+    
+    [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];
 }
 
 @end
@@ -930,6 +961,12 @@ const int firstParameterOffset = 1;
 {
     VMScanClient* client = [self getClientFromCommand:command];
     [client characteristicRead:command];
+}
+
+-(void)blacklistUUIDs:(CDVInvokedUrlCommand*) command
+{
+    VMScanClient* client = [self getClientFromCommand:command];
+    [client blacklistUUIDs:command];
 }
 
 @end
