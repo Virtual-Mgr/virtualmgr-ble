@@ -28,7 +28,7 @@ Characteristic.prototype.read = function(notify, success, error) {
 	if (typeof(notify) === 'function') {
 		error = success;
 		success = notify;
-		notify = false; 
+		notify = false;
 	}
 	var self = this;
 	var service = self.service();
@@ -136,15 +136,22 @@ Peripheral.prototype.disconnect = function(success, error) {
 	}, error, _module, "peripheralDisconnect", [client.id, self.id]);
 }
 
-function Client(id) {
+function Client(id, options) {
 	this.id = id;
 	this.peripherals = Object.create(null);
+	this.options = options || {
+		keepPeripherals: true,
+		deleteExistingClient: false
+	};
+	if (this.options.deleteExistingClient) {
+		exec(null, null, _module, "deleteClient", [this.id]);
+	}
 }
 
 Client.prototype.startScanning = function (serviceUUIDs, options, success, error) {
 	var self = this;
 	exec(function(scanResult) {
-		if (scanResult) {
+		if (scanResult && self.options.keepPeripherals) {
 			var peripherals = [];
 			scanResult.forEach(function(sr) {
 				var peripheral = self.peripherals[sr.id];
@@ -178,6 +185,16 @@ Client.prototype.unsubscribeStateChange = function (success, error) {
 	exec(success, error, _module, "clientUnsubscribeStateChange", [this.id]);
 }
 
+Client.prototype.blacklist = function(peripherals, success, error) {
+	var self = this;
+	var uuids = [];
+	peripherals.forEach(function(peripheral) {
+		uuids.push(peripheral.id);
+		delete self.peripherals[peripheral.id];
+	});
+	exec(success, error, _module, "clientBlacklistUUIDs", [this.id, uuids])
+}
+
 // Updated API - clientXXX functions allow multiple JS clients to have their own BLE comms
 exports.Client = Client;
 
@@ -199,6 +216,3 @@ exports.subscribeStateChange = function(success, error) {
 exports.unsubscribeStateChange = function(success, error) {
 	exec(success, error, _module, "clientUnsubscribeStateChange", [_defaultClientId]);
 }
-
-
-
