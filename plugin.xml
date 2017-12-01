@@ -1,2 +1,15 @@
-<?xml version='1.0' encoding='utf-8'?>
-<plugin id="com.virtualmgr.cordova.ble" version="1.2.0" xmlns="http://apache.org/cordova/ns/plugins/1.0" xmlns:android="http://schemas.android.com/apk/res/android"><name>VirtualManagerBLE</name><js-module name="VirtualManagerBLE" src="www/VirtualManagerBLE.js"><clobbers target="cordova.plugins.VirtualManagerBLE" /></js-module><platform name="ios"><config-file parent="/*" target="config.xml"><feature name="VirtualManagerBLE"><param name="ios-package" value="VirtualManagerBLE" /></feature></config-file><source-file src="src/ios/VirtualManagerBLE.m" /></platform></plugin>
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin id="com.virtualmgr.cordova.ble" version="1.3.0" xmlns="http://apache.org/cordova/ns/plugins/1.0" xmlns:android="http://schemas.android.com/apk/res/android">
+  <name>VirtualManagerBLE</name>
+  <js-module name="VirtualManagerBLE" src="www/VirtualManagerBLE.js">
+    <clobbers target="cordova.plugins.VirtualManagerBLE" />
+  </js-module>
+  <platform name="ios">
+    <config-file parent="/*" target="config.xml">
+      <feature name="VirtualManagerBLE">
+        <param name="ios-package" value="VirtualManagerBLE" />
+      </feature>
+    </config-file>
+    <source-file src="src/ios/VirtualManagerBLE.m" />
+  </platform>
+</plugin>
