@@ -12,4 +12,17 @@
     </config-file>
     <source-file src="src/ios/VirtualManagerBLE.m" />
   </platform>
+  <platform name="android">
+    <config-file parent="/*" target="res/xml/config.xml">
+      <feature name="VirtualManagerBLE">
+        <param name="android-package" value="VirtualManagerBLE.VirtualManagerBLE" />
+      </feature>
+    </config-file>
+    <config-file parent="/*" target="AndroidManifest.xml">
+      <uses-permission android:name="android.permission.BLUETOOTH" />
+  		<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+  		<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    </config-file>
+    <source-file src="src/android/VirtualManagerBLE.java" target-dir="src/VirtualManagerBLE" />
+  </platform>
 </plugin>
