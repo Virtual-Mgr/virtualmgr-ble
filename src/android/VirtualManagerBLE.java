@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothManager;
@@ -26,7 +27,6 @@ import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.content.Intent;
-import android.os.Handler;
 import android.os.ParcelUuid;
 import android.telecom.Call;
 import android.util.Base64;
@@ -44,8 +44,12 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 	private BluetoothAdapter _bluetoothAdapter;
 	private CallbackContext _callbackContext;
-	private SingleScanner _scanner;
 	private HashMap<String, VMScanClient> _clients = new HashMap<String, VMScanClient>();
+
+	public class VMPeripheral
+	{
+
+	}
 
 	public static String getBluetoothAdapterStateName(BluetoothAdapter adapter) {
 		switch(adapter.getState()) {
@@ -71,14 +75,13 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			jobj.put("name", scanResult.getDevice().getName());
 		}
 		jobj.put("rssi", scanResult.getRssi());
-
 		ScanRecord record = scanResult.getScanRecord();
 		if (record != null) {
 			JSONObject advertisementInfo = new JSONObject();
 			SparseArray<byte[]> mfds = record.getManufacturerSpecificData();
 
 			if (record.getBytes() != null && mfds != null) {
-				byte[] data = record.getBytes().clone();
+				byte[] data = new byte[record.getBytes().length];
 				int p = 0;
 				for (int i = 0; i < mfds.size(); i++) {
 					int key = mfds.keyAt(i);
@@ -93,83 +96,66 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				advertisementInfo.put("data", Base64.encodeToString(data, 0, p, Base64.DEFAULT));
 			}
 			jobj.put("advertisement", advertisementInfo);
-		}
-		return jobj;
-	}
-
-	public class SingleScanner extends ScanCallback {
-		private final BluetoothAdapter _adapter;
-		private final BluetoothLeScanner _scanner;
-
-		public SingleScanner(Blue)
+		}		return jobj;
 	}
 
 	public class VMScanClient extends ScanCallback {
 		public final String ClientId;
-		private final SingleScanner _scanner;
+		private final BluetoothAdapter _adapter;
+		private final BluetoothLeScanner _scanner;
 		private final CallbackContext _callbackContext;
-
-		private ArrayList<ParcelUuid> _serviceFilters;
 
 		private int _groupSize = -1;
 		private long _groupTimeout = 0;
 
+		private HashMap<String, VMPeripheral> _peripherals = new HashMap<String, VMPeripheral>();
 		private CallbackContext _scanResultCallbackId;
 		private CallbackContext _stateChangeCallbackId;
-		private JSONArray _groupedScans;
+		private ArrayList<JSONObject> _groupedScans = new ArrayList<JSONObject>();
 		private HashSet<String> _blacklistedUUIDS = new HashSet<String>();
-		private Handler _sendGroupedScanTimer;
 
-		public VMScanClient(String clientId, CallbackContext callbackContext, SingleScanner scanner) {
+		public VMScanClient(String clientId, CallbackContext callbackContext, BluetoothAdapter bluetoothAdapter) {
+			_adapter = bluetoothAdapter;
+			_scanner = bluetoothAdapter.getBluetoothLeScanner();
 			ClientId = clientId;
-			_scanner = scanner;
 			_callbackContext = callbackContext;
 		}
 
 		public void Dispose() {
+			_peripherals = null;
 			_scanResultCallbackId = null;
 			_stateChangeCallbackId = null;
 			_groupedScans = null;
 			_blacklistedUUIDS = null;
-			_sendGroupedScanTimer = null;
-		}
-
-		private void sendGroupScans() {
-			synchronized (this) {
-				if (_scanResultCallbackId != null && _groupedScans != null && _groupedScans.length() > 0) {
-					PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, _groupedScans);
-					pluginResult.setKeepCallback(true);
-
-					_scanResultCallbackId.sendPluginResult(pluginResult);
-				}
-				_groupedScans = null;
-				_sendGroupedScanTimer = null;
-			}
 		}
 
 		@Override
 		public void onScanResult(int callbackType, ScanResult result) {
-			try {
-				JSONObject jobj = getPeripheralInfo(result);
+			Log.d(LOGTAG, "onScanResult " + callbackType + " = " + result.toString());
+		}
 
-				synchronized (this) {
-					if (_groupedScans == null) {
-						_groupedScans = new JSONArray();
-					}
-					_groupedScans.put(jobj);
-					if (_groupTimeout == 0 || (_groupSize > 0 && _groupedScans.length() > _groupSize)) {
-						sendGroupScans();
-					} else if (_sendGroupedScanTimer == null) {
-						_sendGroupedScanTimer = new Handler();
-						_sendGroupedScanTimer.postDelayed(new Runnable() {
-							public void run() {
-								sendGroupScans();
-							}
-						}, _groupTimeout);
+		/**
+		 * Callback when batch results are delivered.
+		 *
+		 * @param results List of scan results that are previously scanned.
+		 */
+		@Override
+		public void onBatchScanResults(List<ScanResult> results) {
+			if (results.size() > 0 && _scanResultCallbackId != null) {
+				JSONArray array = new JSONArray();
+				for(ScanResult sr : results) {
+					try {
+						JSONObject jobj = getPeripheralInfo(sr);
+						array.put(jobj);
+					} catch (JSONException je) {
+						LOG.e(LOGTAG, "onBatchScanResults threw " + je.toString());
 					}
 				}
-			} catch (JSONException je) {
-				LOG.e(LOGTAG, "onScanResult threw " + je.toString());
+
+				PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, array);
+				pluginResult.setKeepCallback(true);
+
+				_scanResultCallbackId.sendPluginResult(pluginResult);
 			}
 		}
 
@@ -196,7 +182,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		public void subscribeStateChange(JSONArray args, CallbackContext callbackContext) {
 			this._stateChangeCallbackId = callbackContext;
 
-			final String state = getBluetoothAdapterStateName(_scanner._adapter);
+			final String state = getBluetoothAdapterStateName(_adapter);
 			PluginResult result = new PluginResult(PluginResult.Status.OK, state);
 			result.setKeepCallback(true);
 
@@ -207,22 +193,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			this._stateChangeCallbackId = null;
 		}
 
-		private final static String BASE_UUID = "00000000-0000-1000-8000-00805F9B34FB";
-		private ParcelUuid parseUUID(String uuid) {
-			String uuidStr = uuid;
-			if (uuid.length() == 4) {			// 16 bit UUID
-				uuidStr = "0000" + uuid + BASE_UUID.substring(8);
-			} else if (uuid.length() == 8) {    // 32 bit UUID
-				uuidStr = uuid + BASE_UUID.substring(8);
-			}
-			try {
-				return ParcelUuid.fromString(uuidStr);
-			} catch (IllegalArgumentException iae) {
-				return null;
-			}
-		}
-
-		public void startScanning(final JSONArray args, final CallbackContext callbackContext) throws JSONException {
+		public void startScanning(JSONArray args, CallbackContext callbackContext) throws JSONException {
 			this._scanResultCallbackId = callbackContext;
 
 			List<ScanFilter> filters = null;
@@ -231,14 +202,9 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				JSONArray serviceUUIDs = args.getJSONArray(1);
 				for(int i = 0 ; i < serviceUUIDs.length() ; i++) {
 					String serviceUUID = serviceUUIDs.getString(i);
-					if (serviceUUID != null) {
-						final ScanFilter.Builder builder = new ScanFilter.Builder();
-						ParcelUuid uuid = parseUUID(serviceUUID);
-						if (uuid != null) {
-							builder.setServiceUuid(uuid);
-							filters.add(builder.build());
-						}
-					}
+					final ScanFilter.Builder builder = new ScanFilter.Builder();
+					builder.setServiceUuid(ParcelUuid.fromString(serviceUUID));
+					filters.add(builder.build());
 				}
 			}
 
@@ -247,43 +213,30 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				JSONObject options = args.getJSONObject(2);
 				final ScanSettings.Builder builder = new ScanSettings.Builder();
 
+				if (options.has("groupTimeout")) {
+					_groupTimeout = options.getLong("groupTimeout");
+					builder.setReportDelay(_groupTimeout);
+				}
 				if (options.has("scanMode")) {
 					builder.setScanMode(options.getInt("scanMode"));
 				}
 
 				settings = builder.build();
 
-				if (options.has("groupTimeout")) {
-					_groupTimeout = options.getLong("groupTimeout");
-				}
-
 				if (options.has("groupSize")) {
 					_groupSize = options.getInt("groupSize");
 				}
-
-				if (_groupTimeout < 0) {
-					_groupTimeout = 0;
-				}
-				// GroupSize of 0 = ignore groupSize and just use groupTimeout
-				if (_groupSize < 0) {
-					_groupSize = 0;
-				}
 			}
 
-			final List<ScanFilter> passFilters = filters;
-			final ScanSettings passSettings = settings;
-			final VMScanClient passThis = this;
-			cordova.getThreadPool().execute(new Runnable() {
-				@Override
-				public void run() {
-					_scanner.startScan(passFilters, passSettings, passThis);
+			// Stop scan first, harmless if not already scanning but stops startScan from failing if we are already scanning
+			_scanner.stopScan(this);
 
-					PluginResult result = new PluginResult(PluginResult.Status.OK, (String)null);
-					result.setKeepCallback(true);
+			_scanner.startScan(filters, settings, this);
 
-					callbackContext.sendPluginResult(result);
-				}
-			});
+			PluginResult result = new PluginResult(PluginResult.Status.OK, (String)null);
+			result.setKeepCallback(true);
+
+			callbackContext.sendPluginResult(result);
 		}
 
 		public void stopScanning(JSONArray args, CallbackContext callbackContext) {
@@ -378,15 +331,14 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			msg.put("platform", "Android");
 			msg.put("version", PLUGIN_VERSION);
 			callbackContext.success(msg);
-			return true;
 		} else if (action.equals("deleteClient")) {
 			if (args.length() >= 1) {
 				final String clientId = args.getString(0);
 				deleteClient(clientId, callbackContext);
-				return true;
 			} else {
 				callbackContext.error("ClientId required");
 			}
+			return true;
 		} else {
 			if (_bluetoothAdapter == null) {
 				callbackContext.error("BLE not Enabled");
@@ -397,37 +349,26 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 					if (action.equals("clientSubscribeStateChange")) {
 						client.subscribeStateChange(args, callbackContext);
-						return true;
 					} else if (action.equals("clientUnsubscribeStateChange")) {
 						client.unsubscribeStateChange(args, callbackContext);
-						return true;
 					} else if (action.equals("clientStartScanning")) {
 						client.startScanning(args, callbackContext);
-						return true;
 					} else if (action.equals("clientStopScanning")) {
 						client.stopScanning(args, callbackContext);
-						return true;
 					} else if (action.equals("clientBlacklistUUIDs")) {
 						client.blacklistUUIDs(args, callbackContext);
-						return true;
 					} else if (action.equals("peripheralConnect")) {
 						client.peripheralConnect(args, callbackContext);
-						return true;
 					} else if (action.equals("peripheralDisconnect")) {
 						client.peripheralDisconnect(args, callbackContext);
-						return true;
 					} else if (action.equals("peripheralDiscoverServices")) {
 						client.peripheralDiscoverServices(args, callbackContext);
-						return true;
 					} else if (action.equals("serviceDiscoverCharacteristics")) {
 						client.serviceDiscoverCharacteristics(args, callbackContext);
-						return true;
 					} else if (action.equals("characteristicWrite")) {
 						client.characteristicWrite(args, callbackContext);
-						return true;
 					} else if (action.equals("characteristicRead")) {
 						client.characteristicRead(args, callbackContext);
-						return true;
 					}
 				} else {
 					callbackContext.error("ClientId required");
