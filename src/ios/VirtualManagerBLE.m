@@ -6,6 +6,8 @@
 //#define DEBUGLOG(fmt, ...) NSLog(fmt, ##__VA_ARGS__)
 #define DEBUGLOG(x, ...)
 
+#define PLUGIN_VERSION @"1.4.0"
+
 NSMutableDictionary* getCharacteristicInfo(CBCharacteristic* characteristic)
 {
     NSMutableDictionary* info = [[NSMutableDictionary alloc] init];
@@ -188,6 +190,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 @property (nonatomic, retain) CBCentralManager* centralManager;
 @property (nonatomic, retain) NSMutableArray* groupedScans;
 @property (nonatomic, retain) NSMutableSet* blackedlistedUUIDs;
+@property (nonatomic, retain) NSMutableDictionary* scanArgs;
 @end
 
 
@@ -212,6 +215,8 @@ const int firstParameterOffset = 1;
         _groupTimeout = 0;
         _groupSize = 1;
         _groupTimeoutScheduled = false;
+
+        self.scanArgs = nil;
     }
     return self;
 }
@@ -225,6 +230,7 @@ const int firstParameterOffset = 1;
     self.peripherals = nil;
     self.groupedScans = nil;
     self.blackedlistedUUIDs = nil;
+    self.scanArgs = nil;
 }
 
 -(void)subscribeStateChange:(CDVInvokedUrlCommand*) command
@@ -258,6 +264,27 @@ const int firstParameterOffset = 1;
     return uuids;
 }
 
+-(void)scanWithArgs
+{
+    if (self.scanArgs == nil) {
+        return;
+    }
+    DEBUGLOG(@"VMScanClient: %@ scanWithArgs", clientId);
+    NSDictionary* options = [_scanArgs objectForKey:@"options"];
+    NSArray* services = [_scanArgs objectForKey:@"services"];
+    NSDictionary* arguments = [_scanArgs objectForKey:@"arguments"];
+
+    [centralManager scanForPeripheralsWithServices:services options:options];
+
+    // Instead of the Javascript client having to reissue the rescan we can do it here ..
+    if (arguments != nil) {
+        NSNumber* rescanTimeout = [arguments objectForKey:@"rescanTimeout"];
+        if (rescanTimeout != nil) {
+            [self performSelector:@selector(scanWithArgs) withObject:nil afterDelay:[rescanTimeout doubleValue] / 1000.0];
+        }
+    }
+}
+
 -(void)startScanning:(CDVInvokedUrlCommand*) command
 {
     DEBUGLOG(@"VMScanClient: %@ StartScanning %@", clientId, command);
@@ -268,8 +295,9 @@ const int firstParameterOffset = 1;
         services = [self getUUIDsFromStringArray:[command.arguments objectAtIndex: firstParameterOffset + 0]];
     }
 
+    NSDictionary* optionArg = nil;
     if (command.arguments.count >= firstParameterOffset + 2) {
-        NSDictionary* optionArg = [command.arguments objectAtIndex: firstParameterOffset + 1];
+        optionArg = [command.arguments objectAtIndex: firstParameterOffset + 1];
         NSNumber* allowDuplicate = [optionArg objectForKey:@"allowDuplicate"];
         if (allowDuplicate && [allowDuplicate boolValue]) {
             [options setObject:allowDuplicate forKey:CBCentralManagerScanOptionAllowDuplicatesKey];
@@ -296,7 +324,11 @@ const int firstParameterOffset = 1;
         _groupSize = 0;
     }
 
-    [centralManager scanForPeripheralsWithServices:services options:options];
+    self.scanArgs = [[NSMutableDictionary alloc] init];
+    [_scanArgs setObject:options forKey:@"options"];
+    [_scanArgs setObject:services forKey:@"services"];
+    [_scanArgs setObject:optionArg forKey:@"arguments"];
+    [self scanWithArgs];
 
     self.scanResultCallbackId = command.callbackId;
 
@@ -312,6 +344,9 @@ const int firstParameterOffset = 1;
     [centralManager stopScan];
     CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK];
     [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];
+
+    self.scanArgs = nil;
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(scanWithArgs) object:nil];
 }
 
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central
@@ -887,6 +922,16 @@ const int firstParameterOffset = 1;
     DEBUGLOG(@"dispose");
     self.clients = nil;
     [super dispose];
+}
+
+-(void)getVersion:(CDVInvokedUrlCommand*) command
+{
+    NSMutableDictionary* result = [[NSMutableDictionary alloc] init];
+    [result setObject:@"iOS" forKey:@"platform"];
+    [result setObject:PLUGIN_VERSION forKey:@"version"];
+
+    CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK messageAsDictionary:result];
+    [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];
 }
 
 -(VMScanClient*)getClientFromCommand:(CDVInvokedUrlCommand*) command
