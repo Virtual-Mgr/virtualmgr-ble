@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<plugin id="com.virtualmgr.cordova.ble" version="1.3.0" xmlns="http://apache.org/cordova/ns/plugins/1.0" xmlns:android="http://schemas.android.com/apk/res/android">
+<plugin id="com.virtualmgr.cordova.ble" version="1.4.0" xmlns="http://apache.org/cordova/ns/plugins/1.0" xmlns:android="http://schemas.android.com/apk/res/android">
   <name>VirtualManagerBLE</name>
   <js-module name="VirtualManagerBLE" src="www/VirtualManagerBLE.js">
     <clobbers target="cordova.plugins.VirtualManagerBLE" />
@@ -24,5 +24,38 @@
   		<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     </config-file>
     <source-file src="src/android/VirtualManagerBLE.java" target-dir="src/VirtualManagerBLE" />
+    <source-file src="src/android/neovisionaries/GattStatusCode.java" target-dir="src/com/neovisionaries/bluetooth/ble" />
+    <source-file src="src/android/neovisionaries/StandardGattService.java" target-dir="src/com/neovisionaries/bluetooth/ble" />
+    <source-file src="src/android/neovisionaries/advertising/ADManufacturerSpecific.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/ADManufacturerSpecificBuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/ADPayloadParser.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/ADStructure.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/ADStructureBuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/Eddystone.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/EddystoneBuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/EddystoneEID.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/EddystoneTLM.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/EddystoneUID.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/EddystoneURL.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/Flags.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/FlagsBuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/IBeacon.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/IBeaconBuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/LocalName.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/LocalNameBuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/MS004CBuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/MS0105Builder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/MS019ABuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/MSBuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/ServiceData.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/ServiceDataBuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/TxPowerLevel.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/TxPowerLevelBuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/UUIDs.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/UUIDsBuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/Ucode.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/advertising/UcodeBuilder.java"  target-dir="src/com/neovisionaries/bluetooth/ble/advertising" />
+    <source-file src="src/android/neovisionaries/util/Bytes.java"  target-dir="src/com/neovisionaries/bluetooth/ble/util" />
+    <source-file src="src/android/neovisionaries/util/UUIDCreator.java"  target-dir="src/com/neovisionaries/bluetooth/ble/util" />
   </platform>
 </plugin>

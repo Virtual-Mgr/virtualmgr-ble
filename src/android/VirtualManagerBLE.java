@@ -16,8 +16,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
@@ -32,13 +34,15 @@ import android.telecom.Call;
 import android.util.Base64;
 import android.util.Log;
 import android.util.SparseArray;
-
+import com.neovisionaries.bluetooth.ble.*;
+import com.neovisionaries.bluetooth.ble.advertising.*;
+import com.neovisionaries.bluetooth.ble.util.*;
 
 /**
  * This class echoes a string called from JavaScript.
  */
 public class VirtualManagerBLE extends CordovaPlugin {
-	private final String PLUGIN_VERSION = "1.2.0";
+	private final String PLUGIN_VERSION = "1.4.0";
 
 	private final String LOGTAG = "VirtualManagerBLE";
 
@@ -80,15 +84,16 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 	public static JSONObject getPeripheralInfo(ScanResult scanResult) throws JSONException {
 		JSONObject jobj = new JSONObject();
-		jobj.put("id", scanResult.getDevice().getAddress());
-		if (scanResult.getDevice().getName() != null) {
-			jobj.put("name", scanResult.getDevice().getName());
+		BluetoothDevice bd = scanResult.getDevice();
+		jobj.put("id", bd.getAddress());
+		if (bd.getName() != null) {
+			jobj.put("name", bd.getName());
 		}
 		jobj.put("rssi", scanResult.getRssi());
 		ScanRecord record = scanResult.getScanRecord();
 		if (record != null) {
 			JSONObject advertisementInfo = new JSONObject();
-			SparseArray<byte[]> mfds = record.getManufacturerSpecificData();
+/*			SparseArray<byte[]> mfds = record.getManufacturerSpecificData();
 
 			if (record.getBytes() != null && mfds != null) {
 				byte[] data = new byte[record.getBytes().length];
@@ -105,8 +110,78 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				}
 				advertisementInfo.put("data", Base64.encodeToString(data, 0, p, Base64.DEFAULT));
 			}
+*/
+			List<ADStructure> structures = ADPayloadParser.getInstance().parse(record.getBytes());
+
+			JSONObject serviceDataInfo = new JSONObject();
+			JSONArray uuidsInfo = new JSONArray();
+			JSONArray solicitedUUIDsInfo = new JSONArray();
+			for (ADStructure structure : structures) {
+				if (structure instanceof ServiceData) {
+					ServiceData serviceData = (ServiceData)structure;
+					String uuidStr = serviceData.getServiceUUID().toString().toUpperCase();
+					switch (serviceData.getType()) {
+						case 0x16:		// 16bit ServiceData
+							serviceDataInfo.put(uuidStr.substring(4, 8), Base64.encodeToString(structure.getData(), 2, structure.getData().length - 2, Base64.DEFAULT));
+							break;
+						case 0x20:		// 32bit ServiceData
+							serviceDataInfo.put(uuidStr.substring(0, 8), Base64.encodeToString(structure.getData(), 4, structure.getData().length - 4, Base64.DEFAULT));
+							break;
+						case 0x21:		// 128bit ServiceData
+							serviceDataInfo.put(uuidStr, Base64.encodeToString(structure.getData(), 16, structure.getData().length - 16, Base64.DEFAULT));
+							break;
+					}
+
+				} else if (structure instanceof UUIDs) {
+					UUIDs uuids = (UUIDs)structure;
+					for (UUID uuid : uuids.getUUIDs()) {
+						String uuidStr = uuid.toString().toUpperCase();
+						switch(uuids.getType()) {
+							case 0x02:	// 16bit UUID (Incomplete list)
+							case 0x03:	// 16bit UUID (Complete list)
+								uuidsInfo.put(uuidStr.substring(4, 8));
+								break;
+							case 0x04:	// 32bit UUID (Incomplete list)
+							case 0x05:	// 32bit UUID (Complete list)
+								uuidsInfo.put(uuidStr.substring(0, 8));
+								break;
+							case 0x06:	// 128bit UUID (Incomplete list)
+							case 0x07:	// 128bit UUID (Complete list)
+								uuidsInfo.put(uuidStr);
+								break;
+							case 0x14:	// 16bit Service Solicited UUID
+								solicitedUUIDsInfo.put(uuidStr.substring(4, 8));
+								break;
+							case 0x15:	// 128bit Service Solicited UUID
+								solicitedUUIDsInfo.put(uuidStr);
+								break;
+							case 0x1F:	// 32bit Service Solicited UUID
+								solicitedUUIDsInfo.put(uuidStr.substring(0, 8));
+								break;
+						}
+					}
+
+				} else if (structure instanceof ADManufacturerSpecific) {
+					ADManufacturerSpecific ms = (ADManufacturerSpecific)structure;
+					advertisementInfo.put("data", Base64.encodeToString(ms.getData(), 0, ms.getData().length, Base64.DEFAULT));
+
+				} else if (structure instanceof TxPowerLevel) {
+					TxPowerLevel txPowerLevel = (TxPowerLevel)structure;
+					advertisementInfo.put("txPower", txPowerLevel.getLevel());
+				}
+			}
+			if (uuidsInfo.length() > 0) {
+				advertisementInfo.put("UUIDS", uuidsInfo);
+			}
+			if (solicitedUUIDsInfo.length() > 0) {
+				advertisementInfo.put("solicitedUUIDS", solicitedUUIDsInfo);
+			}
+			if (serviceDataInfo.length() > 0) {
+				advertisementInfo.put("serviceData", serviceDataInfo);
+			}
 			jobj.put("advertisement", advertisementInfo);
 		}
+
 		return jobj;
 	}
 
@@ -211,9 +286,12 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				JSONArray serviceUUIDs = args.getJSONArray(1);
 				for(int i = 0 ; i < serviceUUIDs.length() ; i++) {
 					String serviceUUID = serviceUUIDs.getString(i);
-					final ScanFilter.Builder builder = new ScanFilter.Builder();
-					builder.setServiceUuid(parseUUID(serviceUUID));
-					filters.add(builder.build());
+					ParcelUuid uuid = parseUUID(serviceUUID);
+					if (uuid != null) {
+						final ScanFilter.Builder builder = new ScanFilter.Builder();
+						builder.setServiceUuid(parseUUID(serviceUUID));
+						filters.add(builder.build());
+					}
 				}
 			}
 

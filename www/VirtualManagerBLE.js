@@ -143,6 +143,9 @@ function Client(id, options) {
 		keepPeripherals: true,
 		deleteExistingClient: false
 	};
+	this.supports = {
+		rescanTimeout: true
+	}
 	if (this.options.deleteExistingClient) {
 		exec(null, null, _module, "deleteClient", [this.id]);
 	}
@@ -215,4 +218,12 @@ exports.subscribeStateChange = function(success, error) {
 
 exports.unsubscribeStateChange = function(success, error) {
 	exec(success, error, _module, "clientUnsubscribeStateChange", [_defaultClientId]);
+}
+
+exports.getVersion = function(success, error) {
+	exec(success, error, _module, "getVersion");
+}
+
+exports.supports = {
+	rescanTimeout: true
 }
