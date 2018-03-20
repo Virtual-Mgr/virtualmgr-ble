@@ -46,9 +46,19 @@ public class VirtualManagerBLE extends CordovaPlugin {
 	private CallbackContext _callbackContext;
 	private HashMap<String, VMScanClient> _clients = new HashMap<String, VMScanClient>();
 
-	public class VMPeripheral
-	{
-
+	private final static String BASE_UUID = "00000000-0000-1000-8000-00805F9B34FB";
+	public static ParcelUuid parseUUID(String uuid) {
+		String uuidStr = uuid;
+		if (uuid.length() == 4) {			// 16 bit UUID
+			uuidStr = "0000" + uuid + BASE_UUID.substring(8);
+		} else if (uuid.length() == 8) {    // 32 bit UUID
+			uuidStr = uuid + BASE_UUID.substring(8);
+		}
+		try {
+			return ParcelUuid.fromString(uuidStr);
+		} catch (IllegalArgumentException iae) {
+			return null;
+		}
 	}
 
 	public static String getBluetoothAdapterStateName(BluetoothAdapter adapter) {
@@ -96,7 +106,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				advertisementInfo.put("data", Base64.encodeToString(data, 0, p, Base64.DEFAULT));
 			}
 			jobj.put("advertisement", advertisementInfo);
-		}		return jobj;
+		}
+		return jobj;
 	}
 
 	public class VMScanClient extends ScanCallback {
@@ -108,7 +119,6 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		private int _groupSize = -1;
 		private long _groupTimeout = 0;
 
-		private HashMap<String, VMPeripheral> _peripherals = new HashMap<String, VMPeripheral>();
 		private CallbackContext _scanResultCallbackId;
 		private CallbackContext _stateChangeCallbackId;
 		private ArrayList<JSONObject> _groupedScans = new ArrayList<JSONObject>();
@@ -122,7 +132,6 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		}
 
 		public void Dispose() {
-			_peripherals = null;
 			_scanResultCallbackId = null;
 			_stateChangeCallbackId = null;
 			_groupedScans = null;
@@ -203,7 +212,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				for(int i = 0 ; i < serviceUUIDs.length() ; i++) {
 					String serviceUUID = serviceUUIDs.getString(i);
 					final ScanFilter.Builder builder = new ScanFilter.Builder();
-					builder.setServiceUuid(ParcelUuid.fromString(serviceUUID));
+					builder.setServiceUuid(parseUUID(serviceUUID));
 					filters.add(builder.build());
 				}
 			}
@@ -331,14 +340,16 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			msg.put("platform", "Android");
 			msg.put("version", PLUGIN_VERSION);
 			callbackContext.success(msg);
+			return true;
 		} else if (action.equals("deleteClient")) {
 			if (args.length() >= 1) {
 				final String clientId = args.getString(0);
 				deleteClient(clientId, callbackContext);
+				return true;
 			} else {
 				callbackContext.error("ClientId required");
+				return false;
 			}
-			return true;
 		} else {
 			if (_bluetoothAdapter == null) {
 				callbackContext.error("BLE not Enabled");
@@ -349,26 +360,37 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 					if (action.equals("clientSubscribeStateChange")) {
 						client.subscribeStateChange(args, callbackContext);
+						return true;
 					} else if (action.equals("clientUnsubscribeStateChange")) {
 						client.unsubscribeStateChange(args, callbackContext);
+						return true;
 					} else if (action.equals("clientStartScanning")) {
 						client.startScanning(args, callbackContext);
+						return true;
 					} else if (action.equals("clientStopScanning")) {
 						client.stopScanning(args, callbackContext);
+						return true;
 					} else if (action.equals("clientBlacklistUUIDs")) {
 						client.blacklistUUIDs(args, callbackContext);
+						return true;
 					} else if (action.equals("peripheralConnect")) {
 						client.peripheralConnect(args, callbackContext);
+						return true;
 					} else if (action.equals("peripheralDisconnect")) {
 						client.peripheralDisconnect(args, callbackContext);
+						return true;
 					} else if (action.equals("peripheralDiscoverServices")) {
 						client.peripheralDiscoverServices(args, callbackContext);
+						return true;
 					} else if (action.equals("serviceDiscoverCharacteristics")) {
 						client.serviceDiscoverCharacteristics(args, callbackContext);
+						return true;
 					} else if (action.equals("characteristicWrite")) {
 						client.characteristicWrite(args, callbackContext);
+						return true;
 					} else if (action.equals("characteristicRead")) {
 						client.characteristicRead(args, callbackContext);
+						return true;
 					}
 				} else {
 					callbackContext.error("ClientId required");
