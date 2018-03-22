@@ -211,33 +211,39 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		}
 
 		public void Dispose() {
-			_scanResultCallbackId = null;
-			_stateChangeCallbackId = null;
-			_groupedScans = null;
-			_blacklistedUUIDS = null;
+			synchronized (this) {
+				_scanResultCallbackId = null;
+				_stateChangeCallbackId = null;
+				_groupedScans = null;
+				_blacklistedUUIDS = null;
+			}
 		}
 
 		@Override
 		public void onScanResult(int callbackType, ScanResult result) {
-			JSONArray array = new JSONArray();
-			try {
-				if (_blacklistedUUIDS.contains(result.getDevice().getAddress())) {
-					return;
+			synchronized (this) {
+				if (_scanResultCallbackId != null) {
+					JSONArray array = new JSONArray();
+					try {
+						if (_blacklistedUUIDS.contains(result.getDevice().getAddress())) {
+							return;
+						}
+
+						if (callbackType != CALLBACK_TYPE_MATCH_LOST) {
+							JSONObject jobj = getPeripheralInfo(result);
+							array.put(jobj);
+						}
+					} catch (JSONException je) {
+						LOG.e(LOGTAG, "onScanResult threw " + je.toString());
+					}
+
+					if (array.length() > 0) {
+						PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, array);
+						pluginResult.setKeepCallback(true);
+
+						_scanResultCallbackId.sendPluginResult(pluginResult);
+					}
 				}
-
-				if (callbackType != CALLBACK_TYPE_MATCH_LOST) {
-					JSONObject jobj = getPeripheralInfo(result);
-					array.put(jobj);
-				}
-			} catch (JSONException je) {
-				LOG.e(LOGTAG, "onScanResult threw " + je.toString());
-			}
-
-			if (array.length() > 0) {
-				PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, array);
-				pluginResult.setKeepCallback(true);
-
-				_scanResultCallbackId.sendPluginResult(pluginResult);
 			}
 		}
 
@@ -248,26 +254,28 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		 */
 		@Override
 		public void onBatchScanResults(List<ScanResult> results) {
-			if (results.size() > 0 && _scanResultCallbackId != null) {
-				JSONArray array = new JSONArray();
-				for(ScanResult sr : results) {
-					try {
-						if (_blacklistedUUIDS.contains(sr.getDevice().getAddress())) {
-							continue;
+			synchronized (this) {
+				if (results.size() > 0 && _scanResultCallbackId != null) {
+					JSONArray array = new JSONArray();
+					for (ScanResult sr : results) {
+						try {
+							if (_blacklistedUUIDS.contains(sr.getDevice().getAddress())) {
+								continue;
+							}
+
+							JSONObject jobj = getPeripheralInfo(sr);
+							array.put(jobj);
+						} catch (JSONException je) {
+							LOG.e(LOGTAG, "onBatchScanResults threw " + je.toString());
 						}
-
-						JSONObject jobj = getPeripheralInfo(sr);
-						array.put(jobj);
-					} catch (JSONException je) {
-						LOG.e(LOGTAG, "onBatchScanResults threw " + je.toString());
 					}
-				}
 
-				if (array.length() > 0) {
-					PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, array);
-					pluginResult.setKeepCallback(true);
+					if (array.length() > 0) {
+						PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, array);
+						pluginResult.setKeepCallback(true);
 
-					_scanResultCallbackId.sendPluginResult(pluginResult);
+						_scanResultCallbackId.sendPluginResult(pluginResult);
+					}
 				}
 			}
 		}
@@ -279,113 +287,125 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		 */
 		@Override
 		public void onScanFailed(int errorCode) {
-			if (_scanResultCallbackId != null) {
-				JSONObject jError = new JSONObject();
-				try {
-					jError.put("errorCode", errorCode);
-				} catch (JSONException je) {
-					Log.e(LOGTAG, "onScanFailed threw " + je.toString());
+			synchronized (this) {
+				if (_scanResultCallbackId != null) {
+					JSONObject jError = new JSONObject();
+					try {
+						jError.put("errorCode", errorCode);
+					} catch (JSONException je) {
+						Log.e(LOGTAG, "onScanFailed threw " + je.toString());
+					}
+					PluginResult result = new PluginResult(PluginResult.Status.ERROR, jError);
+					result.setKeepCallback(true);
+					_scanResultCallbackId.sendPluginResult(result);
 				}
-				PluginResult result = new PluginResult(PluginResult.Status.ERROR, jError);
-				result.setKeepCallback(true);
-				_scanResultCallbackId.sendPluginResult(result);
 			}
 		}
 
 		public void subscribeStateChange(JSONArray args, CallbackContext callbackContext) {
-			this._stateChangeCallbackId = callbackContext;
+			synchronized (this) {
+				this._stateChangeCallbackId = callbackContext;
 
-			final String state = getBluetoothAdapterStateName(_adapter);
-			PluginResult result = new PluginResult(PluginResult.Status.OK, state);
-			result.setKeepCallback(true);
+				final String state = getBluetoothAdapterStateName(_adapter);
+				PluginResult result = new PluginResult(PluginResult.Status.OK, state);
+				result.setKeepCallback(true);
 
-			callbackContext.sendPluginResult(result);
+				callbackContext.sendPluginResult(result);
+			}
 		}
 
 		public void unsubscribeStateChange(JSONArray args, CallbackContext callbackContext) {
-			this._stateChangeCallbackId = null;
+			synchronized (this) {
+				this._stateChangeCallbackId = null;
+			}
 		}
 
 		public void startScanning(JSONArray args, CallbackContext callbackContext) throws JSONException {
-			this._scanResultCallbackId = callbackContext;
+			synchronized (this) {
+				this._scanResultCallbackId = callbackContext;
 
-			List<ScanFilter> filters = null;
-			if (args.length() >= 2) {
-				filters = new ArrayList<ScanFilter>();
-				JSONArray serviceUUIDs = args.getJSONArray(1);
-				for(int i = 0 ; i < serviceUUIDs.length() ; i++) {
-					String serviceUUID = serviceUUIDs.getString(i);
-					ParcelUuid uuid = parseUUID(serviceUUID);
-					if (uuid != null) {
-						final ScanFilter.Builder builder = new ScanFilter.Builder();
-						builder.setServiceUuid(parseUUID(serviceUUID));
-						filters.add(builder.build());
+				List<ScanFilter> filters = null;
+				if (args.length() >= 2) {
+					filters = new ArrayList<ScanFilter>();
+					JSONArray serviceUUIDs = args.getJSONArray(1);
+					for (int i = 0; i < serviceUUIDs.length(); i++) {
+						String serviceUUID = serviceUUIDs.getString(i);
+						ParcelUuid uuid = parseUUID(serviceUUID);
+						if (uuid != null) {
+							final ScanFilter.Builder builder = new ScanFilter.Builder();
+							builder.setServiceUuid(parseUUID(serviceUUID));
+							filters.add(builder.build());
+						}
 					}
 				}
+
+				ScanSettings settings = null;
+				if (args.length() >= 3) {
+					JSONObject options = args.getJSONObject(2);
+					final ScanSettings.Builder builder = new ScanSettings.Builder();
+
+					if (options.has("groupTimeout")) {
+						_groupTimeout = options.getLong("groupTimeout");
+						builder.setReportDelay(_groupTimeout);
+					}
+					if (options.has("scanMode")) {
+						builder.setScanMode(options.getInt("scanMode"));
+					}
+
+					if (Build.VERSION.SDK_INT >= 23) {
+						if (options.has("callbackType")) {
+							int callbackType = options.getInt("callbackType");
+							builder.setCallbackType(callbackType);
+						}
+						if (options.has("matchMode")) {
+							int matchMode = options.getInt("matchMode");
+							builder.setMatchMode(matchMode);
+						}
+						if (options.has("numOfMatches")) {
+							int numOfMatches = options.getInt("numOfMatches");
+							builder.setNumOfMatches(numOfMatches);
+						}
+					}
+					settings = builder.build();
+
+					if (options.has("groupSize")) {
+						_groupSize = options.getInt("groupSize");
+					}
+				}
+
+				// Stop scan first, harmless if not already scanning but stops startScan from failing if we are already scanning
+				_scanner.stopScan(this);
+
+				_scanner.startScan(filters, settings, this);
+
+				PluginResult result = new PluginResult(PluginResult.Status.OK, (String) null);
+				result.setKeepCallback(true);
+
+				callbackContext.sendPluginResult(result);
 			}
-
-			ScanSettings settings = null;
-			if (args.length() >= 3) {
-				JSONObject options = args.getJSONObject(2);
-				final ScanSettings.Builder builder = new ScanSettings.Builder();
-
-				if (options.has("groupTimeout")) {
-					_groupTimeout = options.getLong("groupTimeout");
-					builder.setReportDelay(_groupTimeout);
-				}
-				if (options.has("scanMode")) {
-					builder.setScanMode(options.getInt("scanMode"));
-				}
-
-				if (Build.VERSION.SDK_INT >= 23) {
-					if (options.has("callbackType")) {
-						int callbackType = options.getInt("callbackType");
-						builder.setCallbackType(callbackType);
-					}
-					if (options.has("matchMode")) {
-						int matchMode = options.getInt("matchMode");
-						builder.setMatchMode(matchMode);
-					}
-					if (options.has("numOfMatches")) {
-						int numOfMatches = options.getInt("numOfMatches");
-						builder.setNumOfMatches(numOfMatches);
-					}
-				}
-				settings = builder.build();
-
-				if (options.has("groupSize")) {
-					_groupSize = options.getInt("groupSize");
-				}
-			}
-
-			// Stop scan first, harmless if not already scanning but stops startScan from failing if we are already scanning
-			_scanner.stopScan(this);
-
-			_scanner.startScan(filters, settings, this);
-
-			PluginResult result = new PluginResult(PluginResult.Status.OK, (String)null);
-			result.setKeepCallback(true);
-
-			callbackContext.sendPluginResult(result);
 		}
 
 		public void stopScanning(JSONArray args, CallbackContext callbackContext) {
-			_scanResultCallbackId = null;
-			_scanner.stopScan(this);
-			callbackContext.success();
+			synchronized (this) {
+				_scanResultCallbackId = null;
+				_scanner.stopScan(this);
+				callbackContext.success();
+			}
 		}
 
 		public void blacklistUUIDs(JSONArray args, CallbackContext callbackContext) throws JSONException {
-			if (args.length() >= 2) {
-				JSONArray uuids = args.getJSONArray(1);
+			synchronized (this) {
+				if (args.length() >= 2) {
+					JSONArray uuids = args.getJSONArray(1);
 
-				for(int i = 0 ; i < uuids.length() ; i++) {
-					String uuid = uuids.getString(i);
-					_blacklistedUUIDS.add(uuid);
+					for (int i = 0; i < uuids.length(); i++) {
+						String uuid = uuids.getString(i);
+						_blacklistedUUIDS.add(uuid);
+					}
+					callbackContext.success();
+				} else {
+					callbackContext.error("Missing argument 'UUIDs'");
 				}
-				callbackContext.success();
-			} else {
-				callbackContext.error("Missing argument 'UUIDs'");
 			}
 		}
 
