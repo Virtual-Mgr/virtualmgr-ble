@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import android.os.Build;
+
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
@@ -37,6 +39,8 @@ import android.util.SparseArray;
 import com.neovisionaries.bluetooth.ble.*;
 import com.neovisionaries.bluetooth.ble.advertising.*;
 import com.neovisionaries.bluetooth.ble.util.*;
+
+import static android.bluetooth.le.ScanSettings.*;
 
 /**
  * This class echoes a string called from JavaScript.
@@ -215,7 +219,26 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 		@Override
 		public void onScanResult(int callbackType, ScanResult result) {
-			Log.d(LOGTAG, "onScanResult " + callbackType + " = " + result.toString());
+			JSONArray array = new JSONArray();
+			try {
+				if (_blacklistedUUIDS.contains(result.getDevice().getAddress())) {
+					return;
+				}
+
+				if (callbackType != CALLBACK_TYPE_MATCH_LOST) {
+					JSONObject jobj = getPeripheralInfo(result);
+					array.put(jobj);
+				}
+			} catch (JSONException je) {
+				LOG.e(LOGTAG, "onScanResult threw " + je.toString());
+			}
+
+			if (array.length() > 0) {
+				PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, array);
+				pluginResult.setKeepCallback(true);
+
+				_scanResultCallbackId.sendPluginResult(pluginResult);
+			}
 		}
 
 		/**
@@ -229,6 +252,10 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				JSONArray array = new JSONArray();
 				for(ScanResult sr : results) {
 					try {
+						if (_blacklistedUUIDS.contains(sr.getDevice().getAddress())) {
+							continue;
+						}
+
 						JSONObject jobj = getPeripheralInfo(sr);
 						array.put(jobj);
 					} catch (JSONException je) {
@@ -236,10 +263,12 @@ public class VirtualManagerBLE extends CordovaPlugin {
 					}
 				}
 
-				PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, array);
-				pluginResult.setKeepCallback(true);
+				if (array.length() > 0) {
+					PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, array);
+					pluginResult.setKeepCallback(true);
 
-				_scanResultCallbackId.sendPluginResult(pluginResult);
+					_scanResultCallbackId.sendPluginResult(pluginResult);
+				}
 			}
 		}
 
@@ -308,6 +337,20 @@ public class VirtualManagerBLE extends CordovaPlugin {
 					builder.setScanMode(options.getInt("scanMode"));
 				}
 
+				if (Build.VERSION.SDK_INT >= 23) {
+					if (options.has("callbackType")) {
+						int callbackType = options.getInt("callbackType");
+						builder.setCallbackType(callbackType);
+					}
+					if (options.has("matchMode")) {
+						int matchMode = options.getInt("matchMode");
+						builder.setMatchMode(matchMode);
+					}
+					if (options.has("numOfMatches")) {
+						int numOfMatches = options.getInt("numOfMatches");
+						builder.setNumOfMatches(numOfMatches);
+					}
+				}
 				settings = builder.build();
 
 				if (options.has("groupSize")) {
