@@ -42,17 +42,23 @@ import com.neovisionaries.bluetooth.ble.util.*;
 
 import static android.bluetooth.le.ScanSettings.*;
 
-/**
- * This class echoes a string called from JavaScript.
+/* This class implements a BLE receiver (does not yet support Connectable devices)
+   Its JS API is a little perculiar in how it "munges" packet data - it is
+   forming the JS packet data to be compatible with iOS VirtualManagerBLE plugin
+   This is most evident with the "data" segment being a concatenation of all Manufacturing Data
+   segments into 1 byte array - this is how iOS under the hood gives data to the VirtualManagerBLE iOS plugin
+   so we are duplicating that behaviour here
  */
 public class VirtualManagerBLE extends CordovaPlugin {
-	private final String PLUGIN_VERSION = "1.4.0";
+	private static final String PLUGIN_VERSION = "1.4.0";
 
-	private final String LOGTAG = "VirtualManagerBLE";
+	private static final String LOGTAG = "VirtualManagerBLE";
 
 	private BluetoothAdapter _bluetoothAdapter;
 	private CallbackContext _callbackContext;
 	private HashMap<String, VMScanClient> _clients = new HashMap<String, VMScanClient>();
+
+	private static int _msgId = 0;
 
 	private final static String BASE_UUID = "00000000-0000-1000-8000-00805F9B34FB";
 	public static ParcelUuid parseUUID(String uuid) {
@@ -89,6 +95,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 	public static JSONObject getPeripheralInfo(ScanResult scanResult) throws JSONException {
 		JSONObject jobj = new JSONObject();
 		BluetoothDevice bd = scanResult.getDevice();
+		jobj.put("msgId", _msgId++);
 		jobj.put("id", bd.getAddress());
 		if (bd.getName() != null) {
 			jobj.put("name", bd.getName());
@@ -97,25 +104,12 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		ScanRecord record = scanResult.getScanRecord();
 		if (record != null) {
 			JSONObject advertisementInfo = new JSONObject();
-/*			SparseArray<byte[]> mfds = record.getManufacturerSpecificData();
-
-			if (record.getBytes() != null && mfds != null) {
-				byte[] data = new byte[record.getBytes().length];
-				int p = 0;
-				for (int i = 0; i < mfds.size(); i++) {
-					int key = mfds.keyAt(i);
-					byte[] mfd = mfds.valueAt(i);
-					if (mfd != null) {
-						data[p++] = (byte) ((key >> 0) & 0xFF);
-						data[p++] = (byte) ((key >> 8) & 0xFF);
-						System.arraycopy(mfd, 0, data, p, mfd.length);
-						p += mfd.length;
-					}
-				}
-				advertisementInfo.put("data", Base64.encodeToString(data, 0, p, Base64.DEFAULT));
-			}
-*/
 			List<ADStructure> structures = ADPayloadParser.getInstance().parse(record.getBytes());
+
+			// "data" under iOS is all manufacturer data segments concat together, 1st segment has the CompanyId
+			// others do not
+			byte[] iOSStyleManufacturerData = new byte[record.getBytes().length];
+			int iOSStyleManufacturerDataIndex = 0;
 
 			JSONObject serviceDataInfo = new JSONObject();
 			JSONArray uuidsInfo = new JSONArray();
@@ -126,13 +120,13 @@ public class VirtualManagerBLE extends CordovaPlugin {
 					String uuidStr = serviceData.getServiceUUID().toString().toUpperCase();
 					switch (serviceData.getType()) {
 						case 0x16:		// 16bit ServiceData
-							serviceDataInfo.put(uuidStr.substring(4, 8), Base64.encodeToString(structure.getData(), 2, structure.getData().length - 2, Base64.DEFAULT));
+							serviceDataInfo.put(uuidStr.substring(4, 8), Base64.encodeToString(structure.getData(), 2, structure.getData().length - 2, Base64.NO_WRAP));
 							break;
 						case 0x20:		// 32bit ServiceData
-							serviceDataInfo.put(uuidStr.substring(0, 8), Base64.encodeToString(structure.getData(), 4, structure.getData().length - 4, Base64.DEFAULT));
+							serviceDataInfo.put(uuidStr.substring(0, 8), Base64.encodeToString(structure.getData(), 4, structure.getData().length - 4, Base64.NO_WRAP));
 							break;
 						case 0x21:		// 128bit ServiceData
-							serviceDataInfo.put(uuidStr, Base64.encodeToString(structure.getData(), 16, structure.getData().length - 16, Base64.DEFAULT));
+							serviceDataInfo.put(uuidStr, Base64.encodeToString(structure.getData(), 16, structure.getData().length - 16, Base64.NO_WRAP));
 							break;
 					}
 
@@ -167,12 +161,22 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 				} else if (structure instanceof ADManufacturerSpecific) {
 					ADManufacturerSpecific ms = (ADManufacturerSpecific)structure;
-					advertisementInfo.put("data", Base64.encodeToString(ms.getData(), 0, ms.getData().length, Base64.DEFAULT));
 
+					if (iOSStyleManufacturerDataIndex == 0) {
+						System.arraycopy(ms.getData(), 0, iOSStyleManufacturerData, iOSStyleManufacturerDataIndex, ms.getData().length);
+						iOSStyleManufacturerDataIndex += ms.getData().length;
+					} else {
+						System.arraycopy(ms.getData(), 2, iOSStyleManufacturerData, iOSStyleManufacturerDataIndex, ms.getData().length - 2);
+						iOSStyleManufacturerDataIndex += ms.getData().length - 2;
+					}
 				} else if (structure instanceof TxPowerLevel) {
 					TxPowerLevel txPowerLevel = (TxPowerLevel)structure;
 					advertisementInfo.put("txPower", txPowerLevel.getLevel());
 				}
+			}
+			if (iOSStyleManufacturerDataIndex > 0) {
+				String b64 = Base64.encodeToString(iOSStyleManufacturerData, 0, iOSStyleManufacturerDataIndex, Base64.NO_WRAP);
+				advertisementInfo.put("data", b64);
 			}
 			if (uuidsInfo.length() > 0) {
 				advertisementInfo.put("UUIDS", uuidsInfo);
@@ -336,6 +340,9 @@ public class VirtualManagerBLE extends CordovaPlugin {
 							builder.setServiceUuid(parseUUID(serviceUUID));
 							filters.add(builder.build());
 						}
+					}
+					if (filters.size() == 0) {
+						filters = null;
 					}
 				}
 
