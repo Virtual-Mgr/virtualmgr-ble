@@ -172,6 +172,14 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				} else if (structure instanceof TxPowerLevel) {
 					TxPowerLevel txPowerLevel = (TxPowerLevel)structure;
 					advertisementInfo.put("txPower", txPowerLevel.getLevel());
+				} else if (structure instanceof LocalName) {
+					LocalName localName = (LocalName)structure;
+					String s = localName.getLocalName();
+					int n = s.indexOf('\0');
+					if (n >= 0) {
+						s = s.substring(0, n);
+					}
+					jobj.put("name", s);
 				}
 			}
 			if (iOSStyleManufacturerDataIndex > 0) {
