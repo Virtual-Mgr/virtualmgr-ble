@@ -2,6 +2,11 @@ var exec = require('cordova/exec');
 
 var _module = "VirtualManagerBLE";
 
+exports.supports = {
+	rescanTimeout: true,
+	subscribedReads: true
+}
+
 function Characteristic(characteristicInfo, service) {
 	Object.assign(this, characteristicInfo);
 	// Parent reference via function prevents JSON.stringify circular reference loops
@@ -24,12 +29,7 @@ Characteristic.prototype.write = function(data, success, error) {
 	exec(success, error, _module, "characteristicWrite", [client.id, peripheral.id, service.uuid, self.uuid, data, !!success]);
 }
 
-Characteristic.prototype.read = function(notify, success, error) {
-	if (typeof(notify) === 'function') {
-		error = success;
-		success = notify;
-		notify = false;
-	}
+Characteristic.prototype.read = function(success, error) {
 	var self = this;
 	var service = self.service();
 	var peripheral = service.peripheral();
@@ -42,18 +42,32 @@ Characteristic.prototype.read = function(notify, success, error) {
 		if (success) {
 			success(value);
 		}
-	}, error, _module, "characteristicRead", [client.id, peripheral.id, service.uuid, self.uuid, !!notify]);
+	}, error, _module, "characteristicRead", [client.id, peripheral.id, service.uuid, self.uuid]);
+}
 
-	if (notify) {
-		// Return a function which when called will cancel the Notify Read
-		return function(success, error) {
-			exec(function(value) {
-				if (success) {
-					success(value);
-				}
-			}, error, _module, "characteristicRead", [client.id, peripheral.id, service.uuid, self.uuid, false]);
+Characteristic.prototype.subscribeRead = function(success, error) {
+	var self = this;
+	var service = self.service();
+	var peripheral = service.peripheral();
+	var client = peripheral.client();
+
+	exec(function(value) {
+		value = new Uint8Array(value);
+		self.lastRead = value;
+
+		if (success) {
+			success(value);
 		}
-	}
+	}, error, _module, "subscribeCharacteristicRead", [client.id, peripheral.id, service.uuid, self.uuid]);
+}
+
+Characteristic.prototype.unsubscribeRead = function(success, error) {
+	var self = this;
+	var service = self.service();
+	var peripheral = service.peripheral();
+	var client = peripheral.client();
+
+	exec(success, error, _module, "unsubscribeCharacteristicRead", [client.id, peripheral.id, service.uuid, self.uuid]);
 }
 
 function Service(uuid, peripheral) {
@@ -137,40 +151,50 @@ Peripheral.prototype.disconnect = function(success, error) {
 }
 
 function Client(id, options) {
+	var self = this;
 	this.id = id;
 	this.peripherals = Object.create(null);
-	this.options = options || {
-		keepPeripherals: true,
+	this.options = Object.assign({
+		keepPeripherals: false,
+		makePeripherals: false,
 		deleteExistingClient: false
-	};
-	this.supports = {
-		rescanTimeout: true
-	}
+	}, options);
+	this.supports = exports.supports;
+
 	if (this.options.deleteExistingClient) {
 		exec(null, null, _module, "deleteClient", [this.id]);
+	}
+
+	if (this.options.keepPeripherals) {
+		this.translateScanResult = function(sr) {
+			var peripheral = self.peripherals[sr.id];
+			if (typeof peripheral === 'undefined') {
+				peripheral = new Peripheral(sr, self);
+				self.peripherals[sr.id] = peripheral;
+			} else {
+				// Update the scan result
+				Object.assign(peripheral, sr);
+			}
+			return peripheral;
+		};
+	} else if (this.options.makePeripherals) {
+		this.translateScanResult = function(sr) {
+			return new Peripheral(sr, self);
+		};
+	} else {
+		this.translateScanResult = function(sr) {
+			return sr;
+		};
 	}
 }
 
 Client.prototype.startScanning = function (serviceUUIDs, options, success, error) {
 	var self = this;
 	exec(function(scanResult) {
-		if (scanResult && self.options.keepPeripherals) {
-			var peripherals = [];
-			scanResult.forEach(function(sr) {
-				var peripheral = self.peripherals[sr.id];
-				if (peripheral === undefined) {
-					var peripheral = new Peripheral(sr, self);
-					self.peripherals[sr.id] = peripheral;
-				} else {
-					// Update the scan result
-					Object.assign(peripheral, sr);
-				}
-				peripherals.push(peripheral);
-			})
-			if (success) {
-				success(peripherals);
+		if (success) {
+			if (scanResult) {
+				scanResult = scanResult.map(self.translateScanResult);
 			}
-		} else if (success) {
 			success(scanResult);
 		}
 	}, error, _module, "clientStartScanning", [self.id, serviceUUIDs, options]);
@@ -224,6 +248,3 @@ exports.getVersion = function(success, error) {
 	exec(success, error, _module, "getVersion");
 }
 
-exports.supports = {
-	rescanTimeout: true
-}

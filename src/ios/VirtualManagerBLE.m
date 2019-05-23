@@ -6,7 +6,7 @@
 //#define DEBUGLOG(fmt, ...) NSLog(fmt, ##__VA_ARGS__)
 #define DEBUGLOG(x, ...)
 
-#define PLUGIN_VERSION @"1.4.0"
+#define PLUGIN_VERSION @"1.5.0"
 
 NSMutableDictionary* getCharacteristicInfo(CBCharacteristic* characteristic)
 {
@@ -223,10 +223,10 @@ const int firstParameterOffset = 1;
 
 -(void)dispose
 {
-	DEBUGLOG(@"VMScanClient dispose: %@", self.clientId);
-	self.clientId = nil;
-	self.commandDelegate = nil;
-	self.centralManager = nil;
+    DEBUGLOG(@"VMScanClient dispose: %@", self.clientId);
+    self.clientId = nil;
+    self.commandDelegate = nil;
+    self.centralManager = nil;
     self.peripherals = nil;
     self.groupedScans = nil;
     self.blackedlistedUUIDs = nil;
@@ -764,20 +764,29 @@ const int firstParameterOffset = 1;
     CDVPluginResult* pluginResult = nil;
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp != nil) {
-        NSString* callbackKey = [@"readCharacteristic:" stringByAppendingString:characteristic.UUID.UUIDString];
-        bool isNotifying = [characteristic isNotifying];
-
-        NSString* callback = [vmp callbackIdForKey:callbackKey remove:!isNotifying];
         if (error == nil) {
             pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsArrayBuffer:characteristic.value];
         } else {
             pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString:error.description];
         }
 
-        DEBUGLOG(@"characteristicReadValue: %@ %@ isNotifying %d", clientId, characteristic.UUID.UUIDString, isNotifying);
+        // If we have a one-off read then call it back, otherwise return data to the subscribed reader
+        NSString* callback = [vmp callbackIdForKey:[@"readCharacteristic:" stringByAppendingString:characteristic.UUID.UUIDString] remove:true];
+        if (callback == nil) {
+            DEBUGLOG(@"subscribedCharacteristicReadValue: %@ %@", clientId, characteristic.UUID.UUIDString);
 
-        [pluginResult setKeepCallbackAsBool: isNotifying];
-        [self.commandDelegate sendPluginResult: pluginResult callbackId: callback];
+            callback = [vmp callbackIdForKey:[@"subscribeReadCharacteristic:" stringByAppendingString:characteristic.UUID.UUIDString] remove:false];
+            if (callback != nil) {
+                [pluginResult setKeepCallbackAsBool: true];
+            }
+        } else {
+            DEBUGLOG(@"characteristicReadValue: %@ %@", clientId, characteristic.UUID.UUIDString);
+
+            [pluginResult setKeepCallbackAsBool: false];
+        }
+        if (callback != nil) {
+            [self.commandDelegate sendPluginResult: pluginResult callbackId: callback];
+        }
     }
 }
 
@@ -786,8 +795,7 @@ const int firstParameterOffset = 1;
     DEBUGLOG(@"characteristicSetNotify: %@ %@", clientId, characteristic.UUID.UUIDString);
     VMPeripheral* vmp = [peripherals objectForKey:peripheral.identifier.UUIDString];
     if (vmp != nil) {
-        // This callback is as a result of [characteristicRead] where we [setNotifyValue] first, so we can
-        // read the characteristic as originall requested
+        // This callback is as a result of [subscribeCharacteristicRead], read the updated value ..
         [vmp.peripheral readValueForCharacteristic:characteristic];
     }
 }
@@ -798,7 +806,6 @@ const int firstParameterOffset = 1;
     NSString* peripheralId = nil;
     CBUUID* serviceUUID = nil;
     CBUUID* characteristicUUID = nil;
-    bool enableNotify = false;
 
     if (command.arguments.count >= firstParameterOffset + 1) {
         peripheralId = [command.arguments objectAtIndex: firstParameterOffset + 0];
@@ -812,15 +819,11 @@ const int firstParameterOffset = 1;
         characteristicUUID = [CBUUID UUIDWithString: [command.arguments objectAtIndex: firstParameterOffset + 2]];
     }
 
-    if (command.arguments.count >= firstParameterOffset + 4) {
-        enableNotify = [[command.arguments objectAtIndex: firstParameterOffset + 3] boolValue];
-    }
-
     if (peripheralId == nil) {
         pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Missing argument 'peripheralId'"];
     }
 
-    DEBUGLOG(@"characteristicRead: %@ %@ notify %d", clientId, characteristicUUID.UUIDString, enableNotify);
+    DEBUGLOG(@"characteristicRead: %@ %@", clientId, characteristicUUID.UUIDString);
 
     if (pluginResult == nil) {
         VMPeripheral* vmp = [peripherals objectForKey:peripheralId];
@@ -857,11 +860,7 @@ const int firstParameterOffset = 1;
         if (pluginResult == nil) {
             [vmp setCallbackId:command.callbackId forKey:[@"readCharacteristic:" stringByAppendingString:characteristic.UUID.UUIDString]];
 
-            if ([characteristic isNotifying] != enableNotify) {
-                [vmp.peripheral setNotifyValue:enableNotify forCharacteristic:characteristic];
-            } else {
-                [vmp.peripheral readValueForCharacteristic:characteristic];
-            }
+            [vmp.peripheral readValueForCharacteristic:characteristic];
         }
     }
 
@@ -892,6 +891,143 @@ const int firstParameterOffset = 1;
     [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];
 }
 
+-(void)subscribeCharacteristicRead:(CDVInvokedUrlCommand*) command
+{
+    CDVPluginResult* pluginResult = nil;
+    NSString* peripheralId = nil;
+    CBUUID* serviceUUID = nil;
+    CBUUID* characteristicUUID = nil;
+
+    if (command.arguments.count >= firstParameterOffset + 1) {
+        peripheralId = [command.arguments objectAtIndex: firstParameterOffset + 0];
+    }
+
+    if (command.arguments.count >= firstParameterOffset + 2) {
+        serviceUUID = [CBUUID UUIDWithString: [command.arguments objectAtIndex: firstParameterOffset + 1]];
+    }
+
+    if (command.arguments.count >= firstParameterOffset + 3) {
+        characteristicUUID = [CBUUID UUIDWithString: [command.arguments objectAtIndex: firstParameterOffset + 2]];
+    }
+
+    if (peripheralId == nil) {
+        pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Missing argument 'peripheralId'"];
+    }
+
+    DEBUGLOG(@"subscribeCharacteristicRead: %@ %@", clientId, characteristicUUID.UUIDString);
+
+    if (pluginResult == nil) {
+        VMPeripheral* vmp = [peripherals objectForKey:peripheralId];
+        if (vmp == nil) {
+            pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Peripheral not found"];
+        }
+
+        CBService* service = nil;
+        if (pluginResult == nil) {
+            for(CBService* find in vmp.peripheral.services) {
+                if ([[find UUID] isEqual: serviceUUID]) {
+                    service = find;
+                    break;
+                }
+            }
+            if (service == nil) {
+                pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Service UUID has not been discovered"];
+            }
+        }
+
+        CBCharacteristic* characteristic = nil;
+        if (pluginResult == nil) {
+            for(CBCharacteristic* find in service.characteristics) {
+                if ([[find UUID] isEqual: characteristicUUID]) {
+                    characteristic = find;
+                    break;
+                }
+            }
+            if (characteristic == nil) {
+                pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Characteristic UUID has not been discovered"];
+            }
+        }
+
+        if (pluginResult == nil) {
+            [vmp setCallbackId:command.callbackId forKey:[@"subscribeReadCharacteristic:" stringByAppendingString:characteristic.UUID.UUIDString]];
+
+            [vmp.peripheral setNotifyValue:true forCharacteristic:characteristic];
+        }
+    }
+
+    if (pluginResult != nil) {
+        [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];
+    }
+}
+
+-(void)unsubscribeCharacteristicRead:(CDVInvokedUrlCommand*) command
+{
+    CDVPluginResult* pluginResult = nil;
+    NSString* peripheralId = nil;
+    CBUUID* serviceUUID = nil;
+    CBUUID* characteristicUUID = nil;
+
+    if (command.arguments.count >= firstParameterOffset + 1) {
+        peripheralId = [command.arguments objectAtIndex: firstParameterOffset + 0];
+    }
+
+    if (command.arguments.count >= firstParameterOffset + 2) {
+        serviceUUID = [CBUUID UUIDWithString: [command.arguments objectAtIndex: firstParameterOffset + 1]];
+    }
+
+    if (command.arguments.count >= firstParameterOffset + 3) {
+        characteristicUUID = [CBUUID UUIDWithString: [command.arguments objectAtIndex: firstParameterOffset + 2]];
+    }
+
+    if (peripheralId == nil) {
+        pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Missing argument 'peripheralId'"];
+    }
+
+    DEBUGLOG(@"unsubscribeCharacteristicRead: %@ %@", clientId, characteristicUUID.UUIDString);
+
+    if (pluginResult == nil) {
+        VMPeripheral* vmp = [peripherals objectForKey:peripheralId];
+        if (vmp == nil) {
+            pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Peripheral not found"];
+        }
+
+        CBService* service = nil;
+        if (pluginResult == nil) {
+            for(CBService* find in vmp.peripheral.services) {
+                if ([[find UUID] isEqual: serviceUUID]) {
+                    service = find;
+                    break;
+                }
+            }
+            if (service == nil) {
+                pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Service UUID has not been discovered"];
+            }
+        }
+
+        CBCharacteristic* characteristic = nil;
+        if (pluginResult == nil) {
+            for(CBCharacteristic* find in service.characteristics) {
+                if ([[find UUID] isEqual: characteristicUUID]) {
+                    characteristic = find;
+                    break;
+                }
+            }
+            if (characteristic == nil) {
+                pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Characteristic UUID has not been discovered"];
+            }
+        }
+
+        if (pluginResult == nil) {
+            [vmp callbackIdForKey:[@"subscribeReadCharacteristic:" stringByAppendingString:characteristic.UUID.UUIDString] remove:true];
+
+            [vmp.peripheral setNotifyValue:false forCharacteristic:characteristic];
+        }
+    }
+
+    if (pluginResult != nil) {
+        [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];
+    }
+}
 @end
 
 
@@ -953,20 +1089,20 @@ const int firstParameterOffset = 1;
 
 -(void)deleteClient:(CDVInvokedUrlCommand*) command
 {
-	CDVPluginResult* pluginResult = nil;
-	NSString* clientId = nil;
+    CDVPluginResult* pluginResult = nil;
+    NSString* clientId = nil;
     if (command.arguments.count >= 1) {
         clientId = [command.arguments objectAtIndex:0];
     }
 
-	VMScanClient* client = [_clients objectForKey:clientId];
+    VMScanClient* client = [_clients objectForKey:clientId];
     if (client != nil) {
-		[_clients removeObjectForKey: clientId];
-		[client dispose];
-		pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
-	} else {
-		pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString: @"Not found"];
-	}
+        [_clients removeObjectForKey: clientId];
+        [client dispose];
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+    } else {
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString: @"Not found"];
+    }
 
     [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];
 }
@@ -1035,6 +1171,18 @@ const int firstParameterOffset = 1;
 {
     VMScanClient* client = [self getClientFromCommand:command];
     [client characteristicRead:command];
+}
+
+-(void)subscribeCharacteristicRead:(CDVInvokedUrlCommand*) command
+{
+    VMScanClient* client = [self getClientFromCommand:command];
+    [client subscribeCharacteristicRead:command];
+}
+
+-(void)unsubscribeCharacteristicRead:(CDVInvokedUrlCommand*) command
+{
+    VMScanClient* client = [self getClientFromCommand:command];
+    [client unsubscribeCharacteristicRead:command];
 }
 
 @end
