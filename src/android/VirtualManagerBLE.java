@@ -50,7 +50,7 @@ import static android.bluetooth.le.ScanSettings.*;
    so we are duplicating that behaviour here
  */
 public class VirtualManagerBLE extends CordovaPlugin {
-	private static final String PLUGIN_VERSION = "1.4.0";
+	private static final String PLUGIN_VERSION = "1.5.1";
 
 	private static final String LOGTAG = "VirtualManagerBLE";
 
@@ -204,7 +204,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 	public class VMScanClient extends ScanCallback {
 		public final String ClientId;
 		private final BluetoothAdapter _adapter;
-		private final BluetoothLeScanner _scanner;
+		private BluetoothLeScanner _scanner;
 		private final CallbackContext _callbackContext;
 
 		private int _groupSize = -1;
@@ -217,13 +217,28 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 		public VMScanClient(String clientId, CallbackContext callbackContext, BluetoothAdapter bluetoothAdapter) {
 			_adapter = bluetoothAdapter;
-			_scanner = bluetoothAdapter.getBluetoothLeScanner();
+			//scanner = bluetoothAdapter.getBluetoothLeScanner();
 			ClientId = clientId;
 			_callbackContext = callbackContext;
 		}
 
+		private BluetoothLeScanner scanner() {
+			if (_scanner == null) {
+				synchronized (this) {
+					if (_scanner == null) {
+						_scanner = _adapter.getBluetoothLeScanner();
+					}
+				}
+			}
+			return _scanner;
+		}
+
 		public void Dispose() {
 			synchronized (this) {
+				if (_scanner != null) {
+					_scanner.stopScan(this);
+					_scanner = null;
+				}
 				_scanResultCallbackId = null;
 				_stateChangeCallbackId = null;
 				_groupedScans = null;
@@ -389,9 +404,9 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				}
 
 				// Stop scan first, harmless if not already scanning but stops startScan from failing if we are already scanning
-				_scanner.stopScan(this);
+				scanner().stopScan(this);
 
-				_scanner.startScan(filters, settings, this);
+				scanner().startScan(filters, settings, this);
 
 				PluginResult result = new PluginResult(PluginResult.Status.OK, (String) null);
 				result.setKeepCallback(true);
@@ -402,8 +417,11 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 		public void stopScanning(JSONArray args, CallbackContext callbackContext) {
 			synchronized (this) {
-				_scanResultCallbackId = null;
-				_scanner.stopScan(this);
+				// Only stop scanning if we are currently scanning
+				if (_scanResultCallbackId != null) {
+					_scanResultCallbackId = null;
+					scanner().stopScan(this);
+				}
 				callbackContext.success();
 			}
 		}
@@ -454,12 +472,6 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 		_bluetoothAdapter = bluetoothManager.getAdapter();
 
-		// Ensures Bluetooth is available on the device and it is enabled. If not,
-		// displays a dialog requesting user permission to enable Bluetooth.
-		if (_bluetoothAdapter == null || !_bluetoothAdapter.isEnabled()) {
-			Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-			cordova.getActivity().startActivityForResult(enableBtIntent, 1);
-		}
 	}
 
 	private VMScanClient getClientFromCommand(String clientId)
@@ -516,38 +528,30 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 					if (action.equals("clientSubscribeStateChange")) {
 						client.subscribeStateChange(args, callbackContext);
-						return true;
 					} else if (action.equals("clientUnsubscribeStateChange")) {
 						client.unsubscribeStateChange(args, callbackContext);
-						return true;
 					} else if (action.equals("clientStartScanning")) {
 						client.startScanning(args, callbackContext);
-						return true;
 					} else if (action.equals("clientStopScanning")) {
 						client.stopScanning(args, callbackContext);
-						return true;
 					} else if (action.equals("clientBlacklistUUIDs")) {
 						client.blacklistUUIDs(args, callbackContext);
-						return true;
 					} else if (action.equals("peripheralConnect")) {
 						client.peripheralConnect(args, callbackContext);
-						return true;
 					} else if (action.equals("peripheralDisconnect")) {
 						client.peripheralDisconnect(args, callbackContext);
-						return true;
 					} else if (action.equals("peripheralDiscoverServices")) {
 						client.peripheralDiscoverServices(args, callbackContext);
-						return true;
 					} else if (action.equals("serviceDiscoverCharacteristics")) {
 						client.serviceDiscoverCharacteristics(args, callbackContext);
-						return true;
 					} else if (action.equals("characteristicWrite")) {
 						client.characteristicWrite(args, callbackContext);
-						return true;
 					} else if (action.equals("characteristicRead")) {
 						client.characteristicRead(args, callbackContext);
-						return true;
+					} else {
+						return false;
 					}
+					return true;
 				} else {
 					callbackContext.error("ClientId required");
 				}
