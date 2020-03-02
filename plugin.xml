@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<plugin id="com.virtualmgr.cordova.ble" version="1.5.1" 
+<plugin id="virtualmgr-ble" version="1.5.1" 
   xmlns="http://apache.org/cordova/ns/plugins/1.0" 
   xmlns:android="http://schemas.android.com/apk/res/android">
-  <name>VirtualManagerBLE</name>
+  <name>virtualmgr-ble</name>
   <js-module name="VirtualManagerBLE" src="www/VirtualManagerBLE.js">
     <clobbers target="cordova.plugins.VirtualManagerBLE" />
   </js-module>

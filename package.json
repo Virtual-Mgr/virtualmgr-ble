@@ -1,9 +1,9 @@
 {
-  "name": "virtualmgrble",
+  "name": "virtualmgr-ble",
   "version": "1.5.1",
   "description": "Virtual Manager BLE plugin",
   "cordova": {
-    "id": "com.virtualmgr.cordova.ble",
+    "id": "virtualmgr-ble",
     "platforms": [
       "ios",
       "android"
