@@ -6,7 +6,7 @@
 //#define DEBUGLOG(fmt, ...) NSLog(fmt, ##__VA_ARGS__)
 #define DEBUGLOG(x, ...)
 
-#define PLUGIN_VERSION @"1.5.0"
+#define PLUGIN_VERSION @"1.5.2"
 
 NSMutableDictionary* getCharacteristicInfo(CBCharacteristic* characteristic)
 {
@@ -187,7 +187,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 @property (nonatomic, retain) NSMutableDictionary* peripherals;
 @property (nonatomic, retain) NSString* scanResultCallbackId;
 @property (nonatomic, retain) NSString* stateChangeCallbackId;
-@property (nonatomic, retain) CBCentralManager* centralManager;
+@property (nonatomic, retain) CBCentralManager* _centralManager;
 @property (nonatomic, retain) NSMutableArray* groupedScans;
 @property (nonatomic, retain) NSMutableSet* blackedlistedUUIDs;
 @property (nonatomic, retain) NSMutableDictionary* scanArgs;
@@ -196,7 +196,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 
 @implementation VMScanClient
 
-@synthesize clientId, commandDelegate, peripherals, scanResultCallbackId, stateChangeCallbackId, centralManager, groupedScans;
+@synthesize clientId, commandDelegate, peripherals, scanResultCallbackId, stateChangeCallbackId, _centralManager, groupedScans;
 
 const int firstParameterOffset = 1;
 
@@ -206,7 +206,6 @@ const int firstParameterOffset = 1;
         DEBUGLOG(@"VMScanClient initClientId: %@", theClientId);
         self.clientId = theClientId;
         self.commandDelegate = theCommandDelegate;
-        self.centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
         self.peripherals = [[NSMutableDictionary alloc] init];
         self.blackedlistedUUIDs = [[NSMutableSet alloc] init];
 
@@ -221,12 +220,20 @@ const int firstParameterOffset = 1;
     return self;
 }
 
+-(CBCentralManager*)centralManager
+{
+    if (self._centralManager == nil) {
+        self._centralManager = [[CBCentralManager alloc] initWithDelegate:self queue:nil];
+    }
+    return self._centralManager;
+}
+
 -(void)dispose
 {
     DEBUGLOG(@"VMScanClient dispose: %@", self.clientId);
     self.clientId = nil;
     self.commandDelegate = nil;
-    self.centralManager = nil;
+    self._centralManager = nil;
     self.peripherals = nil;
     self.groupedScans = nil;
     self.blackedlistedUUIDs = nil;
@@ -235,9 +242,12 @@ const int firstParameterOffset = 1;
 
 -(void)subscribeStateChange:(CDVInvokedUrlCommand*) command
 {
-    NSString* state = getCentralManagerStateName((CBCentralManagerState)centralManager.state);
-    DEBUGLOG(@"subscribeStageChange %@ currently %@", clientId, state);
     self.stateChangeCallbackId = command.callbackId;
+    NSString* state = @"unknown";
+    if (self._centralManager != nil) {
+        state = getCentralManagerStateName((CBCentralManagerState)[self centralManager].state);
+    }
+    DEBUGLOG(@"subscribeStageChange %@ currently %@", clientId, state);
 
     CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsString: state];
     [pluginResult setKeepCallbackAsBool:TRUE];
@@ -274,7 +284,7 @@ const int firstParameterOffset = 1;
     NSArray* services = [_scanArgs objectForKey:@"services"];
     NSDictionary* arguments = [_scanArgs objectForKey:@"arguments"];
 
-    [centralManager scanForPeripheralsWithServices:services options:options];
+    [[self centralManager] scanForPeripheralsWithServices:services options:options];
 
     // Instead of the Javascript client having to reissue the rescan we can do it here ..
     if (arguments != nil) {
@@ -341,7 +351,9 @@ const int firstParameterOffset = 1;
 -(void)stopScanning:(CDVInvokedUrlCommand*) command
 {
     DEBUGLOG(@"stopScanning %@", clientId);
-    [centralManager stopScan];
+    if (self._centralManager != nil) {
+        [self._centralManager stopScan];
+    }
     CDVPluginResult* pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK];
     [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];
 
@@ -486,7 +498,7 @@ const int firstParameterOffset = 1;
             DEBUGLOG(@"BLE Connect %@", vmp.peripheral.identifier.UUIDString);
 
             [vmp setCallbackId:command.callbackId forKey:@"connect"];
-            [centralManager connectPeripheral:vmp.peripheral options:options];
+            [[self centralManager] connectPeripheral:vmp.peripheral options:options];
         }
     }
 
@@ -524,7 +536,7 @@ const int firstParameterOffset = 1;
             DEBUGLOG(@"BLE Disconnect %@", vmp.peripheral.identifier.UUIDString);
 
             [vmp setCallbackId:command.callbackId forKey:@"connect"];
-            [centralManager cancelPeripheralConnection:vmp.peripheral];
+            [[self centralManager] cancelPeripheralConnection:vmp.peripheral];
         }
     }
 
@@ -1110,14 +1122,14 @@ const int firstParameterOffset = 1;
 -(void)clientSubscribeStateChange:(CDVInvokedUrlCommand*) command
 {
     VMScanClient* client = [self getClientFromCommand:command];
-    [client subscribeStateChange:command];
-}
+        [client subscribeStateChange:command];
+    }
 
 -(void)clientUnsubscribeStateChange:(CDVInvokedUrlCommand*) command
 {
     VMScanClient* client = [self getClientFromCommand:command];
-    [client unsubscribeStateChange:command];
-}
+        [client unsubscribeStateChange:command];
+    }
 
 -(void)clientStartScanning:(CDVInvokedUrlCommand*) command
 {
@@ -1129,7 +1141,7 @@ const int firstParameterOffset = 1;
 {
     VMScanClient* client = [self getClientFromCommand:command];
     [client stopScanning:command];
-}
+    }
 
 -(void)clientBlacklistUUIDs:(CDVInvokedUrlCommand*) command
 {
