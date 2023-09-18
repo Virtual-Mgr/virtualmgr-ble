@@ -21,9 +21,7 @@
       </feature>
     </config-file>
     <config-file parent="/*" target="AndroidManifest.xml">
-      <uses-permission android:name="android.permission.BLUETOOTH" />
-      <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
-      <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+      <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
     </config-file>
     <source-file src="src/android/VirtualManagerBLE.java" target-dir="src/VirtualManagerBLE" />
     <source-file src="src/android/neovisionaries/GattStatusCode.java" target-dir="src/com/neovisionaries/bluetooth/ble" />
