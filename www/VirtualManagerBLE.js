@@ -1,41 +1,87 @@
-var exec = require('cordova/exec');
+var _exec = require('cordova/exec');
+
+// Change to true to get detailed plugin logs
+var debugExec = false;
+
+function log(msg) {
+	var dt = new Date();
+	msg = dt.toISOString() + ' - ' + msg;
+	console.log(msg);
+}
+
+function JSONSerialize(o) {
+	return JSON.stringify(o, function (key, value) {
+		if (value instanceof Uint8Array) {
+			return Array.from(value);
+		} else if (value instanceof ArrayBuffer) {
+			return Array.from(new Uint8Array(value));
+		} else {
+			return value;
+		}
+	});
+}
+
+var exec = _exec;
+if (debugExec) {
+	exec = function (success, error, module, method, args) {
+		log(`exec ${module} ${method} ${JSONSerialize(args)}`);
+		var successWrapper = function (result) {
+			window.setTimeout(function () {
+				log(`exec ${module} ${method} success ${JSONSerialize(result)}`);
+				if (success) {
+					success(result);
+				}
+			});
+		};
+		var errorWrapper = function (result) {
+			window.setTimeout(function () {
+				log(`exec ${module} ${method} error ${JSONSerialize(result)}`);
+				if (error) {
+					error(result);
+				}
+			});
+		};
+		_exec(successWrapper, errorWrapper, module, method, args);
+	}
+}
 
 var _module = "VirtualManagerBLE";
 
 exports.supports = {
 	rescanTimeout: true,
-	subscribedReads: true
+	subscribedReads: true,
+	requestMtu: true,
 }
 
 function Characteristic(characteristicInfo, service) {
 	Object.assign(this, characteristicInfo);
 	// Parent reference via function prevents JSON.stringify circular reference loops
-	this.service = function() { return service; }
+	this.service = function () { return service; }
 }
 
-Characteristic.prototype.write = function(data, success, error) {
+Characteristic.prototype.write = function (data, success, error) {
 	var self = this;
 	if (data instanceof Array) {
-        // assuming array of integer
-        data = new Uint8Array(data).buffer;
-    } else if (data instanceof Uint8Array) {
-        data = data.buffer;
-    }
+		// assuming array of integer
+		data = new Uint8Array(data).buffer;
+	} else if (data instanceof Uint8Array) {
+		data = data.buffer;
+	}
 
-    // !!success is true if success function is defined, and indicates a response to the write is required
+	// !!success is true if success function is defined, and indicates a response to the write is required
 	var service = self.service();
 	var peripheral = service.peripheral();
 	var client = peripheral.client();
 	exec(success, error, _module, "characteristicWrite", [client.id, peripheral.id, service.uuid, self.uuid, data, !!success]);
 }
 
-Characteristic.prototype.read = function(success, error) {
+Characteristic.prototype.read = function (success, error) {
 	var self = this;
 	var service = self.service();
 	var peripheral = service.peripheral();
 	var client = peripheral.client();
 
-	exec(function(value) {
+	exec(function (value) {
 		value = new Uint8Array(value);
 		self.lastRead = value;
 
@@ -45,13 +91,13 @@ Characteristic.prototype.read = function(success, error) {
 	}, error, _module, "characteristicRead", [client.id, peripheral.id, service.uuid, self.uuid]);
 }
 
-Characteristic.prototype.subscribeRead = function(success, error) {
+Characteristic.prototype.subscribeRead = function (success, error) {
 	var self = this;
 	var service = self.service();
 	var peripheral = service.peripheral();
 	var client = peripheral.client();
 
-	exec(function(value) {
+	exec(function (value) {
 		value = new Uint8Array(value);
 		self.lastRead = value;
 
@@ -61,7 +107,7 @@ Characteristic.prototype.subscribeRead = function(success, error) {
 	}, error, _module, "subscribeCharacteristicRead", [client.id, peripheral.id, service.uuid, self.uuid]);
 }
 
-Characteristic.prototype.unsubscribeRead = function(success, error) {
+Characteristic.prototype.unsubscribeRead = function (success, error) {
 	var self = this;
 	var service = self.service();
 	var peripheral = service.peripheral();
@@ -73,17 +119,17 @@ Characteristic.prototype.unsubscribeRead = function(success, error) {
 function Service(uuid, peripheral) {
 	this.uuid = uuid;
 	// Parent reference via function prevents JSON.stringify circular reference loops
-	this.peripheral = function() { return peripheral; }
+	this.peripheral = function () { return peripheral; }
 	this.characteristics = Object.create(null);
 }
 
-Service.prototype.discoverCharacteristics = function(characteristicUUIDs, success, error) {
+Service.prototype.discoverCharacteristics = function (characteristicUUIDs, success, error) {
 	var self = this;
 	var peripheral = this.peripheral();
 	var client = peripheral.client();
-	exec(function(result) {
+	exec(function (result) {
 		var characteristics = [];
-		result.forEach(function(c) {
+		result.forEach(function (c) {
 			var characteristic = self.characteristics[c.uuid];
 			if (characteristic === undefined) {
 				characteristic = new Characteristic(c, self);
@@ -100,17 +146,17 @@ Service.prototype.discoverCharacteristics = function(characteristicUUIDs, succes
 function Peripheral(scanResult, client) {
 	Object.assign(this, scanResult);
 	// Parent reference via function prevents JSON.stringify circular reference loops
-	this.client = function() { return client; }
+	this.client = function () { return client; }
 	this.connected = false;
 	this.services = Object.create(null);
 }
 
-Peripheral.prototype.discoverServices = function(serviceUUIDs, success, error) {
+Peripheral.prototype.discoverServices = function (serviceUUIDs, success, error) {
 	var self = this;
 	var client = this.client();
-	exec(function(result) {
+	exec(function (result) {
 		var services = [];
-		result.forEach(function(uuid) {
+		result.forEach(function (uuid) {
 			var service = self.services[uuid];
 			if (service === undefined) {
 				service = new Service(uuid, self);
@@ -124,10 +170,10 @@ Peripheral.prototype.discoverServices = function(serviceUUIDs, success, error) {
 	}, error, _module, "peripheralDiscoverServices", [client.id, self.id, serviceUUIDs]);
 }
 
-Peripheral.prototype.connect = function(success, error) {
+Peripheral.prototype.connect = function (success, error) {
 	var self = this;
 	var client = this.client();
-	exec(function(msg) {
+	exec(function (msg) {
 		if (msg == 'connect') {
 			self.connected = true;
 		} else if (msg == 'disconnect') {
@@ -139,15 +185,21 @@ Peripheral.prototype.connect = function(success, error) {
 	}, error, _module, "peripheralConnect", [client.id, self.id]);
 }
 
-Peripheral.prototype.disconnect = function(success, error) {
+Peripheral.prototype.disconnect = function (success, error) {
 	var self = this;
 	var client = this.client();
-	exec(function() {
+	exec(function () {
 		self.connected = false;
 		if (success) {
 			success();
 		}
 	}, error, _module, "peripheralDisconnect", [client.id, self.id]);
+}
+
+Peripheral.prototype.requestMtu = function (mtu, success, error) {
+	var self = this;
+	var client = this.client();
+	exec(success, error, _module, "peripheralRequestMtu", [client.id, self.id, mtu]);
 }
 
 function Client(id, options) {
@@ -166,7 +218,7 @@ function Client(id, options) {
 	}
 
 	if (this.options.keepPeripherals) {
-		this.translateScanResult = function(sr) {
+		this.translateScanResult = function (sr) {
 			var peripheral = self.peripherals[sr.id];
 			if (typeof peripheral === 'undefined') {
 				peripheral = new Peripheral(sr, self);
@@ -178,11 +230,11 @@ function Client(id, options) {
 			return peripheral;
 		};
 	} else if (this.options.makePeripherals) {
-		this.translateScanResult = function(sr) {
+		this.translateScanResult = function (sr) {
 			return new Peripheral(sr, self);
 		};
 	} else {
-		this.translateScanResult = function(sr) {
+		this.translateScanResult = function (sr) {
 			return sr;
 		};
 	}
@@ -190,7 +242,7 @@ function Client(id, options) {
 
 Client.prototype.startScanning = function (serviceUUIDs, options, success, error) {
 	var self = this;
-	exec(function(scanResult) {
+	exec(function (scanResult) {
 		if (success) {
 			if (scanResult) {
 				scanResult = scanResult.map(self.translateScanResult);
@@ -212,10 +264,10 @@ Client.prototype.unsubscribeStateChange = function (success, error) {
 	exec(success, error, _module, "clientUnsubscribeStateChange", [this.id]);
 }
 
-Client.prototype.blacklist = function(peripherals, success, error) {
+Client.prototype.blacklist = function (peripherals, success, error) {
 	var self = this;
 	var uuids = [];
-	peripherals.forEach(function(peripheral) {
+	peripherals.forEach(function (peripheral) {
 		uuids.push(peripheral.id);
 		delete self.peripherals[peripheral.id];
 	});
@@ -228,23 +280,23 @@ exports.Client = Client;
 // Old API - only a single JS client can use this, note this API does not create Peripherals or hang onto them
 var _defaultClientId = "Default";
 
-exports.startScanning = function(serviceUUIDs, options, success, error) {
+exports.startScanning = function (serviceUUIDs, options, success, error) {
 	exec(success, error, _module, "clientStartScanning", [_defaultClientId, serviceUUIDs, options]);
 }
 
-exports.stopScanning = function(success, error) {
+exports.stopScanning = function (success, error) {
 	exec(success, error, _module, "clientStopScanning", [_defaultClientId]);
 }
 
-exports.subscribeStateChange = function(success, error) {
+exports.subscribeStateChange = function (success, error) {
 	exec(success, error, _module, "clientSubscribeStateChange", [_defaultClientId]);
 }
 
-exports.unsubscribeStateChange = function(success, error) {
+exports.unsubscribeStateChange = function (success, error) {
 	exec(success, error, _module, "clientUnsubscribeStateChange", [_defaultClientId]);
 }
 
-exports.getVersion = function(success, error) {
+exports.getVersion = function (success, error) {
 	exec(success, error, _module, "getVersion");
 }
 

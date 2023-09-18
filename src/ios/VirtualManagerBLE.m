@@ -6,7 +6,7 @@
 //#define DEBUGLOG(fmt, ...) NSLog(fmt, ##__VA_ARGS__)
 #define DEBUGLOG(x, ...)
 
-#define PLUGIN_VERSION @"1.5.2"
+#define PLUGIN_VERSION @"1.6.0"
 
 NSMutableDictionary* getCharacteristicInfo(CBCharacteristic* characteristic)
 {
@@ -544,6 +544,46 @@ const int firstParameterOffset = 1;
         [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];
     }
 }
+
+-(void)peripheralRequestMtu:(CDVInvokedUrlCommand*)command
+{
+    CDVPluginResult* pluginResult = nil;
+    NSString* peripheralId = nil;
+    NSNumber* mtu = nil;
+
+    if (command.arguments.count >= firstParameterOffset + 1) {
+        peripheralId = [command.arguments objectAtIndex: firstParameterOffset + 0];
+    }
+
+    if (command.arguments.count >= firstParameterOffset + 2) {
+        mtu = [command.arguments objectAtIndex: firstParameterOffset + 1];
+    } else {
+        pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Missing argument 'mtu'"];
+    }
+
+    if (peripheralId == nil) {
+        pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Missing argument 'peripheralId'"];
+    }
+
+    if (pluginResult == nil) {
+        VMPeripheral* vmp = [peripherals objectForKey:peripheralId];
+
+        if (vmp == nil) {
+            pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_ERROR messageAsString: @"Peripheral not found"];
+        }
+
+        if (pluginResult == nil) {
+            // On iOS we can't set the Mtu directly, iOS negotiates this for us but we can retrieve it
+            int mtuResult = [vmp peripheral].maximumWriteValueLength;
+            pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsInt: mtuResult];
+        }
+    }
+
+    if (pluginResult != nil) {
+        [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];
+    }
+}
+
 
 -(void)peripheral:(CBPeripheral *)peripheral didDiscoverServices:(NSError *)error
 {
@@ -1159,6 +1199,12 @@ const int firstParameterOffset = 1;
 {
     VMScanClient* client = [self getClientFromCommand:command];
     [client peripheralDisconnect:command];
+}
+
+-(void)peripheralRequestMtu:(CDVInvokedUrlCommand*) command
+{
+    VMScanClient* client = [self getClientFromCommand:command];
+    [client peripheralRequestMtu:command];
 }
 
 -(void)peripheralDiscoverServices:(CDVInvokedUrlCommand*) command

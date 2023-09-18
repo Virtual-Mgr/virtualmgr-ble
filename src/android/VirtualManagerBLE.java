@@ -56,7 +56,7 @@ import static android.bluetooth.le.ScanSettings.*;
    so we are duplicating that behaviour here
  */
 public class VirtualManagerBLE extends CordovaPlugin {
-	private static final String PLUGIN_VERSION = "1.5.1";
+	private static final String PLUGIN_VERSION = "1.6.0";
 
 	private static final String LOGTAG = "VirtualManagerBLE";
 
@@ -277,6 +277,31 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 			return null;
 		}
+
+		public PluginResult requestMtu(int mtu, CallbackContext callback) {
+			if (_gatt == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
+			}
+			setCallback("requestMtu", callback);
+			_gatt.requestMtu(mtu);
+			return null;
+		}
+
+		@Override
+		public void onMtuChanged(BluetoothGatt gatt, int mtu, int status) {
+			CallbackContext callback = getCallback("requestMtu", true);
+			if (status == BluetoothGatt.GATT_SUCCESS) {
+				if (callback != null) {
+					callback.success(mtu);
+				}
+			} else {
+				String errorMessage = "requestMtu error: " + status;
+				LOG.e(LOGTAG, errorMessage);
+				if (callback != null) {
+					callback.error(errorMessage);
+				}
+			}
+        }
 
 		public PluginResult discoverServices(ArrayList<String> discoverServices, CallbackContext callback) {
 			if (_gatt == null) {
@@ -837,6 +862,36 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			}
 		}
 
+		public void peripheralRequestMtu(JSONArray args, CallbackContext callbackContext) throws JSONException {
+			String peripheralId = null;
+			int mtu = -1;
+			PluginResult pluginResult = null;
+
+			if (args.length() >= 1) {
+				peripheralId = args.getString(1);
+			}
+			if (args.length() >= 2) {
+				mtu = args.getInt(2);
+			} else {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Missing argument 'mtu'");
+			}
+
+			if (pluginResult == null) {
+				VMPeripheral peripheral = _peripherals.get(peripheralId);
+				if (peripheral == null) {
+					pluginResult = new PluginResult(PluginResult.Status.ERROR, "Peripheral not found");
+				}
+
+				if (pluginResult == null) {
+					pluginResult = peripheral.requestMtu(mtu, callbackContext);
+				}
+			}
+
+			if (pluginResult != null) {
+				callbackContext.sendPluginResult(pluginResult);
+			}
+		}
+
 		public void peripheralDiscoverServices(JSONArray args, CallbackContext callbackContext) throws JSONException {
 			String peripheralId = null;
 			ArrayList<String> serviceUUIDs = null;
@@ -1178,6 +1233,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 						client.peripheralConnect(args, callbackContext);
 					} else if (action.equals("peripheralDisconnect")) {
 						client.peripheralDisconnect(args, callbackContext);
+					} else if (action.equals("peripheralRequestMtu")) {
+						client.peripheralRequestMtu(args, callbackContext);
 					} else if (action.equals("peripheralDiscoverServices")) {
 						client.peripheralDiscoverServices(args, callbackContext);
 					} else if (action.equals("serviceDiscoverCharacteristics")) {
