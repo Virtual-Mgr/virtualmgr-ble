@@ -1,6 +1,6 @@
 {
   "name": "virtualmgr-ble",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "description": "Virtual Manager BLE plugin",
   "cordova": {
     "id": "virtualmgr-ble",
