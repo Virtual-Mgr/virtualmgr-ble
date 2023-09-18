@@ -18,6 +18,12 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
+import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothProfile;
 import android.os.Build;
 
 import android.bluetooth.BluetoothAdapter;
@@ -55,12 +61,13 @@ public class VirtualManagerBLE extends CordovaPlugin {
 	private static final String LOGTAG = "VirtualManagerBLE";
 
 	private BluetoothAdapter _bluetoothAdapter;
-	private CallbackContext _callbackContext;
 	private HashMap<String, VMScanClient> _clients = new HashMap<String, VMScanClient>();
 
 	private static int _msgId = 0;
 
 	private final static String BASE_UUID = "00000000-0000-1000-8000-00805F9B34FB";
+	private static final UUID CLIENT_CHARACTERISTIC_CONFIGURATION_DESCRIPTOR_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
+
 	public static ParcelUuid parseUUID(String uuid) {
 		String uuidStr = uuid;
 		if (uuid.length() == 4) {			// 16 bit UUID
@@ -195,17 +202,324 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			if (serviceDataInfo.length() > 0) {
 				advertisementInfo.put("serviceData", serviceDataInfo);
 			}
+			
+			advertisementInfo.put("connectable", scanResult.isConnectable());
+
 			jobj.put("advertisement", advertisementInfo);
 		}
 
 		return jobj;
 	}
 
+	public class VMPeripheral extends BluetoothGattCallback {
+		private final CordovaInterface _cordova;
+		public final String Id;
+		public final BluetoothDevice Device;
+		private BluetoothGatt _gatt;
+		private ArrayList<String> _discoverServices;
+
+		private HashMap<String, CallbackContext> _callbacks = new HashMap();
+
+		public void dispose() {
+			if (_gatt != null) {
+				_gatt.disconnect();
+				_gatt.close();
+				_gatt = null;
+			}
+
+			if (_discoverServices != null) {
+				_discoverServices.clear();
+				_discoverServices = null;
+			}
+
+			if (_callbacks != null) {
+				_callbacks.clear();
+				_callbacks = null;
+			}
+		}
+
+		private CallbackContext getCallback(String name, boolean remove) {
+			CallbackContext callback = _callbacks.get(name);
+			if (callback != null && remove) {
+				_callbacks.remove(name);
+			}
+			return callback;
+		}
+
+		private void setCallback(String name, CallbackContext callback) {
+			_callbacks.put(name, callback);
+		}
+
+		public VMPeripheral(CordovaInterface cordova, BluetoothDevice device) {
+			_cordova = cordova;
+			Device = device;
+			Id = device.getAddress();
+		}
+
+		public PluginResult connect(CallbackContext callback) {
+			setCallback("connect", callback);
+			Device.connectGatt(_cordova.getActivity().getApplicationContext(), false, this);
+			return null; 	// We will Connect or Fail, nothing to callback with yet
+		}
+
+		public PluginResult disconnect(CallbackContext callback) {
+			if (_gatt == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
+			}
+			// Note, intentionally re-assign the ConnectCallback to the Disconnect callback (we are already Connected)
+			// If the client deliberately Disconnects the peripheral then we call its Disconnect(success) method
+			// If the peripheral disconnects unexpectedly then we call the Connect(success) method
+			// with "disconnect"
+			setCallback("connect", callback);
+			_gatt.disconnect();
+			_gatt.close();
+			_gatt = null;
+
+			return null;
+		}
+
+		public PluginResult discoverServices(ArrayList<String> discoverServices, CallbackContext callback) {
+			if (_gatt == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
+			}
+
+			_discoverServices = discoverServices;
+			setCallback("discoverServices", callback);
+			_gatt.discoverServices();
+
+			return null;
+		}
+
+		public PluginResult discoverServiceCharacteristics(UUID serviceUUID, ArrayList<String> discoverCharacteristics, CallbackContext callback) throws JSONException {
+			if (_gatt == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
+			}
+
+			BluetoothGattService service = _gatt.getService(serviceUUID);
+			if (service == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
+			}
+
+			JSONArray jArray = new JSONArray();
+			List<BluetoothGattCharacteristic> characteristics = service.getCharacteristics();
+			for (BluetoothGattCharacteristic characteristic : characteristics) {
+				JSONObject jObj = new JSONObject();
+				String characteristicUUID = characteristic.getUuid().toString().toUpperCase();
+				if (discoverCharacteristics.isEmpty() || discoverCharacteristics.contains(characteristicUUID)) {
+					jObj.put("uuid", characteristicUUID);
+					jObj.put("properties", characteristic.getProperties());
+					jArray.put(jObj);
+				}
+			}
+
+			return new PluginResult(PluginResult.Status.OK, jArray);
+		}
+
+		public PluginResult writeCharacteristic(UUID serviceUUID, UUID characteristicUUID, byte[] data, boolean writeWithResponse, CallbackContext callback) {
+			if (_gatt == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
+			}
+
+			BluetoothGattService service = _gatt.getService(serviceUUID);
+			if (service == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
+			}
+
+			BluetoothGattCharacteristic characteristic = service.getCharacteristic(characteristicUUID);
+			if (characteristic == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
+			}
+
+			characteristic.setWriteType(writeWithResponse ? BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT : BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+			characteristic.setValue(data);
+
+			setCallback("writeCharacteristic:" + characteristicUUID.toString(), callback);
+			_gatt.writeCharacteristic(characteristic);
+
+			return null;
+		}
+
+		public PluginResult readCharacteristic(UUID serviceUUID, UUID characteristicUUID, CallbackContext callback) {
+			if (_gatt == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
+			}
+
+			BluetoothGattService service = _gatt.getService(serviceUUID);
+			if (service == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
+			}
+
+			BluetoothGattCharacteristic characteristic = service.getCharacteristic(characteristicUUID);
+			if (characteristic == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
+			}
+
+			setCallback("readCharacteristic:" + characteristicUUID.toString(), callback);
+			_gatt.readCharacteristic(characteristic);
+
+			return null;
+		}
+
+		public PluginResult subscribeReadCharacteristic(UUID serviceUUID, UUID characteristicUUID, CallbackContext callback) {
+			if (_gatt == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
+			}
+
+			BluetoothGattService service = _gatt.getService(serviceUUID);
+			if (service == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
+			}
+
+			BluetoothGattCharacteristic characteristic = service.getCharacteristic(characteristicUUID);
+			if (characteristic == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
+			}
+
+			setCallback("subscribeReadCharacteristic:" + characteristicUUID.toString(), callback);
+			_gatt.setCharacteristicNotification(characteristic, true);
+			BluetoothGattDescriptor descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIGURATION_DESCRIPTOR_UUID);
+
+			// Simulate what iOS does which is to use Notifications if the characteristic supports it, otherwise use
+			// Indications instead
+			if ((characteristic.getProperties() & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0) {
+				descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+			} else if ((characteristic.getProperties() & BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0) {
+				descriptor.setValue(BluetoothGattDescriptor.ENABLE_INDICATION_VALUE);
+			} else {
+				return new PluginResult(PluginResult.Status.ERROR, "Characteristic does not support subscribeRead");
+			}
+
+			_gatt.writeDescriptor(descriptor);
+
+			return null;
+		}
+
+		public PluginResult unsubscribeReadCharacteristic(UUID serviceUUID, UUID characteristicUUID, CallbackContext callback) {
+			if (_gatt == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
+			}
+
+			BluetoothGattService service = _gatt.getService(serviceUUID);
+			if (service == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
+			}
+
+			BluetoothGattCharacteristic characteristic = service.getCharacteristic(characteristicUUID);
+			if (characteristic == null) {
+				return new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
+			}
+
+			getCallback("subscribeReadCharacteristic:" + characteristicUUID.toString(), true);
+			_gatt.setCharacteristicNotification(characteristic, false);
+			BluetoothGattDescriptor descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIGURATION_DESCRIPTOR_UUID);
+
+			descriptor.setValue(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE);
+
+			_gatt.writeDescriptor(descriptor);
+
+			return null;
+		}
+
+		@Override
+		public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+			if (newState == BluetoothProfile.STATE_CONNECTED) {
+				_gatt = gatt;
+				CallbackContext callback = getCallback("connect", false);
+				if (callback != null) {
+					PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, "connect");
+					pluginResult.setKeepCallback(true);
+					callback.sendPluginResult(pluginResult);
+				}
+			} else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+				// Note, intentionally calling the ConnectCallback for a Disconnect ..
+				// If the client deliberately Disconnects the peripheral then we call its Disconnect(success) method
+				// If the peripheral disconnects unexpectedly then we call the Connect(success) method
+				// with "disconnect"
+				CallbackContext callback = getCallback("connect", true);
+				if (callback != null) {
+					PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, "disconnect");
+					pluginResult.setKeepCallback(false);		// We can kill the Connect callback now
+					callback.sendPluginResult(pluginResult);
+				}
+			}
+		}
+
+		@Override
+		public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+			CallbackContext callback = getCallback("discoverServices", true);
+			if (status == BluetoothGatt.GATT_SUCCESS) {
+				if (callback != null) {
+					List<BluetoothGattService> services = gatt.getServices();
+					JSONArray servicesUUIDs = new JSONArray();
+
+					for (BluetoothGattService service : services) {
+						String serviceUUID = service.getUuid().toString().toUpperCase();
+						if (_discoverServices.isEmpty() || _discoverServices.contains(serviceUUID)) {
+							servicesUUIDs.put(serviceUUID);
+						}
+					}
+
+					callback.success(servicesUUIDs);
+				}
+			} else {
+				String errorMessage = "discoverServices error: " + status;
+				LOG.e(LOGTAG, errorMessage);
+				if (callback != null) {
+					callback.error(errorMessage);
+				}
+			}
+		}
+
+		@Override
+		public void onCharacteristicWrite(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+			CallbackContext callback = getCallback("writeCharacteristic:" + characteristic.getUuid().toString(), true);
+			if (status == BluetoothGatt.GATT_SUCCESS) {
+				if (callback != null) {
+					callback.success();
+				}
+			} else {
+				String errorMessage = "writeCharacteristic error: " + status;
+				LOG.e(LOGTAG, errorMessage);
+				if (callback != null) {
+					callback.error(errorMessage);
+				}
+			}
+		}
+
+		@Override
+		public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+			CallbackContext callback = getCallback("readCharacteristic:" + characteristic.getUuid().toString(), true);
+			if (status == BluetoothGatt.GATT_SUCCESS) {
+				if (callback != null) {
+					byte[] data = characteristic.getValue();
+					callback.success(data);
+				}
+			} else {
+				String errorMessage = "readCharacteristic error: " + status;
+				LOG.e(LOGTAG, errorMessage);
+				if (callback != null) {
+					callback.error(errorMessage);
+				}
+			}
+		}
+
+		@Override
+		public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
+			CallbackContext callback = getCallback("subscribeReadCharacteristic:" + characteristic.getUuid().toString(), false);
+			if (callback != null) {
+				byte[] value = characteristic.getValue();
+				PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, value);
+				pluginResult.setKeepCallback(true);			// Keep the callback for more updates
+				callback.sendPluginResult(pluginResult);
+			}
+		}
+	}
+
 	public class VMScanClient extends ScanCallback {
+		private final CordovaInterface _cordova;
 		public final String ClientId;
 		private final BluetoothAdapter _adapter;
 		private BluetoothLeScanner _scanner;
-		private final CallbackContext _callbackContext;
 
 		private int _groupSize = -1;
 		private long _groupTimeout = 0;
@@ -214,12 +528,13 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		private CallbackContext _stateChangeCallbackId;
 		private ArrayList<JSONObject> _groupedScans = new ArrayList<JSONObject>();
 		private HashSet<String> _blacklistedUUIDS = new HashSet<String>();
+		private HashMap<String, VMPeripheral> _peripherals = new HashMap();
 
-		public VMScanClient(String clientId, CallbackContext callbackContext, BluetoothAdapter bluetoothAdapter) {
+		public VMScanClient(CordovaInterface cordova, String clientId, BluetoothAdapter bluetoothAdapter) {
+			_cordova = cordova;
 			_adapter = bluetoothAdapter;
 			//scanner = bluetoothAdapter.getBluetoothLeScanner();
 			ClientId = clientId;
-			_callbackContext = callbackContext;
 		}
 
 		private BluetoothLeScanner scanner() {
@@ -243,6 +558,14 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				_stateChangeCallbackId = null;
 				_groupedScans = null;
 				_blacklistedUUIDS = null;
+
+				if (_peripherals != null) {
+					for(VMPeripheral p : _peripherals.values()) {
+						p.dispose();
+					}
+					_peripherals.clear();
+					_peripherals = null;
+				}
 			}
 		}
 
@@ -252,8 +575,16 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				if (_scanResultCallbackId != null) {
 					JSONArray array = new JSONArray();
 					try {
-						if (_blacklistedUUIDS.contains(result.getDevice().getAddress())) {
+						BluetoothDevice device = result.getDevice();
+						String peripheralId = device.getAddress();
+						if (_blacklistedUUIDS.contains(peripheralId)) {
 							return;
+						}
+
+						VMPeripheral peripheral = _peripherals.get(peripheralId);
+						if (peripheral == null) {
+							peripheral = new VMPeripheral(_cordova, device);
+							_peripherals.put(peripheralId, peripheral);
 						}
 
 						if (callbackType != CALLBACK_TYPE_MATCH_LOST) {
@@ -286,8 +617,16 @@ public class VirtualManagerBLE extends CordovaPlugin {
 					JSONArray array = new JSONArray();
 					for (ScanResult sr : results) {
 						try {
-							if (_blacklistedUUIDS.contains(sr.getDevice().getAddress())) {
+							BluetoothDevice device = sr.getDevice();
+							String peripheralId = device.getAddress();
+							if (_blacklistedUUIDS.contains(peripheralId)) {
 								continue;
+							}
+
+							VMPeripheral peripheral = _peripherals.get(peripheralId);
+							if (peripheral == null) {
+								peripheral = new VMPeripheral(_cordova, device);
+								_peripherals.put(peripheralId, peripheral);
 							}
 
 							JSONObject jobj = getPeripheralInfo(sr);
@@ -442,23 +781,322 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			}
 		}
 
-		public void peripheralConnect(JSONArray args, CallbackContext callbackContext) {
+		public void peripheralConnect(JSONArray args, CallbackContext callbackContext) throws JSONException {
+			String peripheralId = null;
+			PluginResult pluginResult = null;
 
+			if (args.length() >= 1) {
+				peripheralId = args.getString(1);
+			}
+
+			if (peripheralId == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Missing argument 'peripheralId'");
+			}
+
+			if (pluginResult == null) {
+				VMPeripheral peripheral = _peripherals.get(peripheralId);
+				if (peripheral == null) {
+					pluginResult = new PluginResult(PluginResult.Status.ERROR, "Peripheral not found");
+				}
+
+				if (pluginResult == null) {
+					pluginResult = peripheral.connect(callbackContext);
+				}
+			}
+
+			if (pluginResult != null) {
+				callbackContext.sendPluginResult(pluginResult);
+			}
 		}
 
-		public void peripheralDisconnect(JSONArray args, CallbackContext callbackContext) {
+		public void peripheralDisconnect(JSONArray args, CallbackContext callbackContext) throws JSONException {
+			String peripheralId = null;
+			PluginResult pluginResult = null;
+
+			if (args.length() >= 1) {
+				peripheralId = args.getString(1);
+			}
+
+			if (peripheralId == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Missing argument 'peripheralId'");
+			}
+
+			if (pluginResult == null) {
+				VMPeripheral peripheral = _peripherals.get(peripheralId);
+				if (peripheral == null) {
+					pluginResult = new PluginResult(PluginResult.Status.ERROR, "Peripheral not found");
+				}
+
+				if (pluginResult == null) {
+					pluginResult = peripheral.disconnect(callbackContext);
+				}
+			}
+
+			if (pluginResult != null) {
+				callbackContext.sendPluginResult(pluginResult);
+			}
 		}
 
-		public void peripheralDiscoverServices(JSONArray args, CallbackContext callbackContext) {
+		public void peripheralDiscoverServices(JSONArray args, CallbackContext callbackContext) throws JSONException {
+			String peripheralId = null;
+			ArrayList<String> serviceUUIDs = null;
+			PluginResult pluginResult = null;
+
+			if (args.length() >= 1) {
+				peripheralId = args.getString(1);
+			}
+			if (args.length() >= 2) {
+				serviceUUIDs = new ArrayList<>();
+				JSONArray uuids = args.getJSONArray(2);
+				for (int i = 0; i < uuids.length(); i++) {
+					String uuid = uuids.getString(i).toUpperCase();
+					serviceUUIDs.add(uuid);
+				}
+			}
+
+			if (peripheralId == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Missing argument 'peripheralId'");
+			}
+
+			if (pluginResult == null) {
+				VMPeripheral peripheral = _peripherals.get(peripheralId);
+				if (peripheral == null) {
+					pluginResult = new PluginResult(PluginResult.Status.ERROR, "Peripheral not found");
+				}
+
+				if (pluginResult == null) {
+					pluginResult = peripheral.discoverServices(serviceUUIDs, callbackContext);
+				}
+			}
+
+			if (pluginResult != null) {
+				callbackContext.sendPluginResult(pluginResult);
+			}
 		}
 
-		public void serviceDiscoverCharacteristics(JSONArray args, CallbackContext callbackContext) {
+		public void serviceDiscoverCharacteristics(JSONArray args, CallbackContext callbackContext) throws JSONException {
+			String peripheralId = null;
+			UUID serviceUUID = null;
+			ArrayList<String> characteristicUUIDs = null;
+			PluginResult pluginResult = null;
+
+			if (args.length() >= 1) {
+				peripheralId = args.getString(1);
+			}
+			if (args.length() >= 2) {
+				characteristicUUIDs = new ArrayList<>();
+				JSONArray uuids = args.getJSONArray(2);
+				for (int i = 0; i < uuids.length(); i++) {
+					String uuid = uuids.getString(i).toUpperCase();
+					characteristicUUIDs.add(uuid);
+				}
+			}
+			if (args.length() >= 3) {
+				serviceUUID = UUID.fromString(args.getString(3));
+			}
+
+			if (peripheralId == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Missing argument 'peripheralId'");
+			}
+
+			if (serviceUUID == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Missing argument 'serviceUUID'");
+			}
+
+			if (pluginResult == null) {
+				VMPeripheral peripheral = _peripherals.get(peripheralId);
+				if (peripheral == null) {
+					pluginResult = new PluginResult(PluginResult.Status.ERROR, "Peripheral not found");
+				}
+
+				if (pluginResult == null) {
+					pluginResult = peripheral.discoverServiceCharacteristics(serviceUUID, characteristicUUIDs, callbackContext);
+				}
+			}
+
+			if (pluginResult != null) {
+				callbackContext.sendPluginResult(pluginResult);
+			}
 		}
 
-		public void characteristicWrite(JSONArray args, CallbackContext callbackContext) {
+		public void characteristicWrite(JSONArray args, CallbackContext callbackContext) throws JSONException {
+			String peripheralId = null;
+			UUID serviceUUID = null;
+			UUID characteristicUUID = null;
+			PluginResult pluginResult = null;
+			byte[] data = null;
+			boolean writeWithResponse = false;
+
+			if (args.length() >= 1) {
+				peripheralId = args.getString(1);
+			}
+			if (args.length() >= 2) {
+				serviceUUID = UUID.fromString(args.getString(2));
+			}
+			if (args.length() >= 3) {
+				characteristicUUID = UUID.fromString(args.getString(3));
+			}
+			if (args.length() >= 4) {
+				String b64 = args.getString(4);
+				data = Base64.decode(b64, Base64.DEFAULT);
+			}
+			if (args.length() >= 5) {
+				writeWithResponse = args.getBoolean(5);
+			}
+
+			if (peripheralId == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Missing argument 'peripheralId'");
+			}
+			if (serviceUUID == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
+			}
+			if (characteristicUUID == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
+			}
+			if (data == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Missing argument 'data'");
+			}
+
+			if (pluginResult == null) {
+				VMPeripheral peripheral = _peripherals.get(peripheralId);
+				if (peripheral == null) {
+					pluginResult = new PluginResult(PluginResult.Status.ERROR, "Peripheral not found");
+				}
+
+				if (pluginResult == null) {
+					pluginResult = peripheral.writeCharacteristic(serviceUUID, characteristicUUID, data, writeWithResponse, callbackContext);
+				}
+			}
+
+			if (pluginResult != null) {
+				callbackContext.sendPluginResult(pluginResult);
+			}
 		}
 
-		public void characteristicRead(JSONArray args, CallbackContext callbackContext) {
+		public void characteristicRead(JSONArray args, CallbackContext callbackContext) throws JSONException {
+			String peripheralId = null;
+			UUID serviceUUID = null;
+			UUID characteristicUUID = null;
+			PluginResult pluginResult = null;
+
+			if (args.length() >= 1) {
+				peripheralId = args.getString(1);
+			}
+			if (args.length() >= 2) {
+				serviceUUID = UUID.fromString(args.getString(2));
+			}
+			if (args.length() >= 3) {
+				characteristicUUID = UUID.fromString(args.getString(3));
+			}
+
+			if (peripheralId == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Missing argument 'peripheralId'");
+			}
+			if (serviceUUID == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
+			}
+			if (characteristicUUID == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
+			}
+
+			if (pluginResult == null) {
+				VMPeripheral peripheral = _peripherals.get(peripheralId);
+				if (peripheral == null) {
+					pluginResult = new PluginResult(PluginResult.Status.ERROR, "Peripheral not found");
+				}
+
+				if (pluginResult == null) {
+					pluginResult = peripheral.readCharacteristic(serviceUUID, characteristicUUID, callbackContext);
+				}
+			}
+
+			if (pluginResult != null) {
+				callbackContext.sendPluginResult(pluginResult);
+			}
+		}
+
+		public void subscribeCharacteristicRead(JSONArray args, CallbackContext callbackContext) throws JSONException {
+			String peripheralId = null;
+			UUID serviceUUID = null;
+			UUID characteristicUUID = null;
+			PluginResult pluginResult = null;
+
+			if (args.length() >= 1) {
+				peripheralId = args.getString(1);
+			}
+			if (args.length() >= 2) {
+				serviceUUID = UUID.fromString(args.getString(2));
+			}
+			if (args.length() >= 3) {
+				characteristicUUID = UUID.fromString(args.getString(3));
+			}
+
+			if (peripheralId == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Missing argument 'peripheralId'");
+			}
+			if (serviceUUID == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
+			}
+			if (characteristicUUID == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
+			}
+
+			if (pluginResult == null) {
+				VMPeripheral peripheral = _peripherals.get(peripheralId);
+				if (peripheral == null) {
+					pluginResult = new PluginResult(PluginResult.Status.ERROR, "Peripheral not found");
+				}
+
+				if (pluginResult == null) {
+					pluginResult = peripheral.subscribeReadCharacteristic(serviceUUID, characteristicUUID, callbackContext);
+				}
+			}
+
+			if (pluginResult != null) {
+				callbackContext.sendPluginResult(pluginResult);
+			}
+		}
+
+		public void unsubscribeCharacteristicRead(JSONArray args, CallbackContext callbackContext) throws JSONException {
+			String peripheralId = null;
+			UUID serviceUUID = null;
+			UUID characteristicUUID = null;
+			PluginResult pluginResult = null;
+
+			if (args.length() >= 1) {
+				peripheralId = args.getString(1);
+			}
+			if (args.length() >= 2) {
+				serviceUUID = UUID.fromString(args.getString(2));
+			}
+			if (args.length() >= 3) {
+				characteristicUUID = UUID.fromString(args.getString(3));
+			}
+
+			if (peripheralId == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Missing argument 'peripheralId'");
+			}
+			if (serviceUUID == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
+			}
+			if (characteristicUUID == null) {
+				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
+			}
+
+			if (pluginResult == null) {
+				VMPeripheral peripheral = _peripherals.get(peripheralId);
+				if (peripheral == null) {
+					pluginResult = new PluginResult(PluginResult.Status.ERROR, "Peripheral not found");
+				}
+
+				if (pluginResult == null) {
+					pluginResult = peripheral.unsubscribeReadCharacteristic(serviceUUID, characteristicUUID, callbackContext);
+				}
+			}
+
+			if (pluginResult != null) {
+				callbackContext.sendPluginResult(pluginResult);
+			}
 		}
 	}
 
@@ -479,7 +1117,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		VMScanClient client = null;
 		if (!_clients.containsKey(clientId))
 		{
-			client = new VMScanClient(clientId, _callbackContext, _bluetoothAdapter);
+			client = new VMScanClient(this.cordova, clientId, _bluetoothAdapter);
 			_clients.put(clientId, client);
 		}
 		else
@@ -548,6 +1186,10 @@ public class VirtualManagerBLE extends CordovaPlugin {
 						client.characteristicWrite(args, callbackContext);
 					} else if (action.equals("characteristicRead")) {
 						client.characteristicRead(args, callbackContext);
+					} else if (action.equals("subscribeCharacteristicRead")) {
+						client.subscribeCharacteristicRead(args, callbackContext);
+					} else if (action.equals("unsubscribeCharacteristicRead")) {
+						client.unsubscribeCharacteristicRead(args, callbackContext);
 					} else {
 						return false;
 					}
