@@ -1350,7 +1350,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			}
 		}
 		if (handler != null) {
-			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+			int targetVersion = cordova.getContext().getApplicationInfo().targetSdkVersion;
+			if (targetVersion >= 31 && Build.VERSION.SDK_INT >= 31) {
 				if (PermissionHelper.hasPermission(this, "BLUETOOTH_SCAN")) {
 					return handler.execute();
 				} else {
