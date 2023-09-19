@@ -24,6 +24,7 @@ import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothProfile;
+import android.content.pm.PackageManager;
 import android.os.Build;
 
 import android.bluetooth.BluetoothAdapter;
@@ -42,11 +43,16 @@ import android.telecom.Call;
 import android.util.Base64;
 import android.util.Log;
 import android.util.SparseArray;
+import android.widget.Toast;
+
 import com.neovisionaries.bluetooth.ble.*;
 import com.neovisionaries.bluetooth.ble.advertising.*;
 import com.neovisionaries.bluetooth.ble.util.*;
+import org.apache.cordova.PermissionHelper;
 
 import static android.bluetooth.le.ScanSettings.*;
+
+import BlueThermThermaQ.BlueThermThermaQ;
 
 /* This class implements a BLE receiver (does not yet support Connectable devices)
    Its JS API is a little perculiar in how it "munges" packet data - it is
@@ -202,7 +208,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			if (serviceDataInfo.length() > 0) {
 				advertisementInfo.put("serviceData", serviceDataInfo);
 			}
-			
+
 			advertisementInfo.put("connectable", scanResult.isConnectable());
 
 			jobj.put("advertisement", advertisementInfo);
@@ -301,7 +307,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 					callback.error(errorMessage);
 				}
 			}
-        }
+		}
 
 		public PluginResult discoverServices(ArrayList<String> discoverServices, CallbackContext callback) {
 			if (_gatt == null) {
@@ -1194,8 +1200,105 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		}
 	}
 
+	private class ExecuteHandler {
+		String action;
+		JSONArray args;
+		CallbackContext callbackContext;
+		public ExecuteHandler(String action, JSONArray args, CallbackContext callbackContext) {
+			this.action = action;
+			this.args = args;
+			this.callbackContext = callbackContext;
+		}
+
+		public boolean execute() throws JSONException {
+			if (args.length() >= 1) {
+				final String clientId = args.getString(0);
+				final VMScanClient client = getClientFromCommand(clientId);
+
+				if (action.equals("clientSubscribeStateChange")) {
+					client.subscribeStateChange(args, callbackContext);
+					return true;
+				} else if (action.equals("clientUnsubscribeStateChange")) {
+					client.unsubscribeStateChange(args, callbackContext);
+					return true;
+				} else if (action.equals("clientStartScanning")) {
+					client.startScanning(args, callbackContext);
+					return true;
+				} else if (action.equals("clientStopScanning")) {
+					client.stopScanning(args, callbackContext);
+					return true;
+				} else if (action.equals("clientBlacklistUUIDs")) {
+					client.blacklistUUIDs(args, callbackContext);
+					return true;
+				} else if (action.equals("peripheralConnect")) {
+					client.peripheralConnect(args, callbackContext);
+					return true;
+				} else if (action.equals("peripheralDisconnect")) {
+					client.peripheralDisconnect(args, callbackContext);
+					return true;
+				} else if (action.equals("peripheralRequestMtu")) {
+					client.peripheralRequestMtu(args, callbackContext);
+					return true;
+				} else if (action.equals("peripheralDiscoverServices")) {
+					client.peripheralDiscoverServices(args, callbackContext);
+					return true;
+				} else if (action.equals("serviceDiscoverCharacteristics")) {
+					client.serviceDiscoverCharacteristics(args, callbackContext);
+					return true;
+				} else if (action.equals("characteristicWrite")) {
+					client.characteristicWrite(args, callbackContext);
+					return true;
+				} else if (action.equals("characteristicRead")) {
+					client.characteristicRead(args, callbackContext);
+					return true;
+				} else if (action.equals("subscribeCharacteristicRead")) {
+					client.subscribeCharacteristicRead(args, callbackContext);
+					return true;
+				} else if (action.equals("unsubscribeCharacteristicRead")) {
+					client.unsubscribeCharacteristicRead(args, callbackContext);
+					return true;
+				}
+			} else {
+				callbackContext.error("ClientId required");
+			}
+			return false;
+		}
+	}
+
+	private HashMap<Integer, ExecuteHandler> _executeHandlers = new HashMap<Integer, ExecuteHandler>();
+	private static final int BLUETOOTH_REQUEST_CODE = 300472;
+
+	@Override
+	public void onRequestPermissionResult(int requestCode, String[] permissions, int[] grantResults) throws JSONException {
+		ExecuteHandler handler = null;
+		synchronized (_executeHandlers) {
+			handler = _executeHandlers.remove(requestCode);
+		}
+		if (handler != null) {
+			String denied = "";
+			for(int i = 0 ; i < permissions.length ; i++) {
+				if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
+					if (denied.length() != 0) {
+						denied += ", ";
+					}
+					denied += permissions[i];
+				}
+			}
+			if (denied.length() > 0) {
+				String msg = "Permissions denied " + denied;
+				handler.callbackContext.error(msg);
+
+				Toast.makeText(this.cordova.getActivity().getApplicationContext(), msg, Toast.LENGTH_SHORT).show();
+			} else {
+				handler.execute();
+			}
+		}
+	}
+
 	@Override
 	public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
+		// Any action which touches BLUETOOTH permissions will be done through ExecuteHandler to check permissions
+		ExecuteHandler handler = null;
 		if (action.equals("getVersion")) {
 			JSONObject msg = new JSONObject();
 			msg.put("platform", "Android");
@@ -1215,45 +1318,51 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			if (_bluetoothAdapter == null) {
 				callbackContext.error("BLE not Enabled");
 			} else {
-				if (args.length() >= 1) {
-					final String clientId = args.getString(0);
-					final VMScanClient client = getClientFromCommand(clientId);
-
-					if (action.equals("clientSubscribeStateChange")) {
-						client.subscribeStateChange(args, callbackContext);
-					} else if (action.equals("clientUnsubscribeStateChange")) {
-						client.unsubscribeStateChange(args, callbackContext);
-					} else if (action.equals("clientStartScanning")) {
-						client.startScanning(args, callbackContext);
-					} else if (action.equals("clientStopScanning")) {
-						client.stopScanning(args, callbackContext);
-					} else if (action.equals("clientBlacklistUUIDs")) {
-						client.blacklistUUIDs(args, callbackContext);
-					} else if (action.equals("peripheralConnect")) {
-						client.peripheralConnect(args, callbackContext);
-					} else if (action.equals("peripheralDisconnect")) {
-						client.peripheralDisconnect(args, callbackContext);
-					} else if (action.equals("peripheralRequestMtu")) {
-						client.peripheralRequestMtu(args, callbackContext);
-					} else if (action.equals("peripheralDiscoverServices")) {
-						client.peripheralDiscoverServices(args, callbackContext);
-					} else if (action.equals("serviceDiscoverCharacteristics")) {
-						client.serviceDiscoverCharacteristics(args, callbackContext);
-					} else if (action.equals("characteristicWrite")) {
-						client.characteristicWrite(args, callbackContext);
-					} else if (action.equals("characteristicRead")) {
-						client.characteristicRead(args, callbackContext);
-					} else if (action.equals("subscribeCharacteristicRead")) {
-						client.subscribeCharacteristicRead(args, callbackContext);
-					} else if (action.equals("unsubscribeCharacteristicRead")) {
-						client.unsubscribeCharacteristicRead(args, callbackContext);
-					} else {
-						return false;
-					}
-					return true;
-				} else {
-					callbackContext.error("ClientId required");
+				if (action.equals("clientSubscribeStateChange")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("clientUnsubscribeStateChange")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("clientStartScanning")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("clientStopScanning")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("clientBlacklistUUIDs")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("peripheralConnect")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("peripheralDisconnect")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("peripheralRequestMtu")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("peripheralDiscoverServices")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("serviceDiscoverCharacteristics")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("characteristicWrite")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("characteristicRead")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("subscribeCharacteristicRead")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
+				} else if (action.equals("unsubscribeCharacteristicRead")) {
+					handler = new ExecuteHandler(action, args, callbackContext);
 				}
+			}
+		}
+		if (handler != null) {
+			if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+				if (PermissionHelper.hasPermission(this, "BLUETOOTH_SCAN")) {
+					return handler.execute();
+				} else {
+					int requestCode = 0;
+					synchronized (_executeHandlers) {
+						requestCode = _executeHandlers.size();
+						_executeHandlers.put(requestCode, handler);
+					}
+					PermissionHelper.requestPermission(this, requestCode, "BLUETOOTH_SCAN");
+				}
+			} else {
+				return handler.execute();
 			}
 		}
 		return false;
