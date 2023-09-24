@@ -1,6 +1,6 @@
 {
   "name": "virtualmgr-ble",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Virtual Manager BLE plugin",
   "cordova": {
     "id": "virtualmgr-ble",
@@ -11,7 +11,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://stevef51@bitbucket.org/stevef51/virtualmgrble.git"
+    "url": "git+https://Virtual-Mgr@bitbucket.org/Virtual-Mgr/virtualmgrble.git"
   },
   "keywords": [
     "ecosystem:cordova",
@@ -20,5 +20,5 @@
   ],
   "author": "Steve Fillingham",
   "license": "ISC",
-  "homepage": "https://bitbucket.org/stevef51/virtualmgrble#readme"
+  "homepage": "https://bitbucket.org/Virtual-Mgr/virtualmgrble#readme"
 }

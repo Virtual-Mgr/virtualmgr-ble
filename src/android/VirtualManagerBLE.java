@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
@@ -51,8 +52,7 @@ import com.neovisionaries.bluetooth.ble.util.*;
 import org.apache.cordova.PermissionHelper;
 
 import static android.bluetooth.le.ScanSettings.*;
-
-import BlueThermThermaQ.BlueThermThermaQ;
+import static androidx.core.app.ActivityCompat.startActivityForResult;
 
 /* This class implements a BLE receiver (does not yet support Connectable devices)
    Its JS API is a little perculiar in how it "munges" packet data - it is
@@ -66,19 +66,25 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 	private static final String LOGTAG = "VirtualManagerBLE";
 
+	// permissions
+	private static final String ACCESS_BACKGROUND_LOCATION = "android.permission.ACCESS_BACKGROUND_LOCATION"; // API 29
+	private static final String BLUETOOTH_CONNECT = "android.permission.BLUETOOTH_CONNECT"; // API 31
+	private static final String BLUETOOTH_SCAN = "android.permission.BLUETOOTH_SCAN"; // API 31
+
 	private BluetoothAdapter _bluetoothAdapter;
 	private HashMap<String, VMScanClient> _clients = new HashMap<String, VMScanClient>();
 
 	private static int _msgId = 0;
 
 	private final static String BASE_UUID = "00000000-0000-1000-8000-00805F9B34FB";
-	private static final UUID CLIENT_CHARACTERISTIC_CONFIGURATION_DESCRIPTOR_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
+	private static final UUID CLIENT_CHARACTERISTIC_CONFIGURATION_DESCRIPTOR_UUID = UUID
+			.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
 	public static ParcelUuid parseUUID(String uuid) {
 		String uuidStr = uuid;
-		if (uuid.length() == 4) {			// 16 bit UUID
+		if (uuid.length() == 4) { // 16 bit UUID
 			uuidStr = "0000" + uuid + BASE_UUID.substring(8);
-		} else if (uuid.length() == 8) {    // 32 bit UUID
+		} else if (uuid.length() == 8) { // 32 bit UUID
 			uuidStr = uuid + BASE_UUID.substring(8);
 		}
 		try {
@@ -89,7 +95,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 	}
 
 	public static String getBluetoothAdapterStateName(BluetoothAdapter adapter) {
-		switch(adapter.getState()) {
+		switch (adapter.getState()) {
 			case BluetoothAdapter.STATE_OFF:
 				return "PoweredOff";
 
@@ -105,6 +111,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		return "Invalid State";
 	}
 
+	// We supress MissingPermission here since it is checked at the "execute" method
+	@SuppressLint("MissingPermission")
 	public static JSONObject getPeripheralInfo(ScanResult scanResult) throws JSONException {
 		JSONObject jobj = new JSONObject();
 		BluetoothDevice bd = scanResult.getDevice();
@@ -119,7 +127,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			JSONObject advertisementInfo = new JSONObject();
 			List<ADStructure> structures = ADPayloadParser.getInstance().parse(record.getBytes());
 
-			// "data" under iOS is all manufacturer data segments concat together, 1st segment has the CompanyId
+			// "data" under iOS is all manufacturer data segments concat together, 1st
+			// segment has the CompanyId
 			// others do not
 			byte[] iOSStyleManufacturerData = new byte[record.getBytes().length];
 			int iOSStyleManufacturerDataIndex = 0;
@@ -129,64 +138,69 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			JSONArray solicitedUUIDsInfo = new JSONArray();
 			for (ADStructure structure : structures) {
 				if (structure instanceof ServiceData) {
-					ServiceData serviceData = (ServiceData)structure;
+					ServiceData serviceData = (ServiceData) structure;
 					String uuidStr = serviceData.getServiceUUID().toString().toUpperCase();
 					switch (serviceData.getType()) {
-						case 0x16:		// 16bit ServiceData
-							serviceDataInfo.put(uuidStr.substring(4, 8), Base64.encodeToString(structure.getData(), 2, structure.getData().length - 2, Base64.NO_WRAP));
+						case 0x16: // 16bit ServiceData
+							serviceDataInfo.put(uuidStr.substring(4, 8), Base64.encodeToString(structure.getData(), 2,
+									structure.getData().length - 2, Base64.NO_WRAP));
 							break;
-						case 0x20:		// 32bit ServiceData
-							serviceDataInfo.put(uuidStr.substring(0, 8), Base64.encodeToString(structure.getData(), 4, structure.getData().length - 4, Base64.NO_WRAP));
+						case 0x20: // 32bit ServiceData
+							serviceDataInfo.put(uuidStr.substring(0, 8), Base64.encodeToString(structure.getData(), 4,
+									structure.getData().length - 4, Base64.NO_WRAP));
 							break;
-						case 0x21:		// 128bit ServiceData
-							serviceDataInfo.put(uuidStr, Base64.encodeToString(structure.getData(), 16, structure.getData().length - 16, Base64.NO_WRAP));
+						case 0x21: // 128bit ServiceData
+							serviceDataInfo.put(uuidStr, Base64.encodeToString(structure.getData(), 16,
+									structure.getData().length - 16, Base64.NO_WRAP));
 							break;
 					}
 
 				} else if (structure instanceof UUIDs) {
-					UUIDs uuids = (UUIDs)structure;
+					UUIDs uuids = (UUIDs) structure;
 					for (UUID uuid : uuids.getUUIDs()) {
 						String uuidStr = uuid.toString().toUpperCase();
-						switch(uuids.getType()) {
-							case 0x02:	// 16bit UUID (Incomplete list)
-							case 0x03:	// 16bit UUID (Complete list)
+						switch (uuids.getType()) {
+							case 0x02: // 16bit UUID (Incomplete list)
+							case 0x03: // 16bit UUID (Complete list)
 								uuidsInfo.put(uuidStr.substring(4, 8));
 								break;
-							case 0x04:	// 32bit UUID (Incomplete list)
-							case 0x05:	// 32bit UUID (Complete list)
+							case 0x04: // 32bit UUID (Incomplete list)
+							case 0x05: // 32bit UUID (Complete list)
 								uuidsInfo.put(uuidStr.substring(0, 8));
 								break;
-							case 0x06:	// 128bit UUID (Incomplete list)
-							case 0x07:	// 128bit UUID (Complete list)
+							case 0x06: // 128bit UUID (Incomplete list)
+							case 0x07: // 128bit UUID (Complete list)
 								uuidsInfo.put(uuidStr);
 								break;
-							case 0x14:	// 16bit Service Solicited UUID
+							case 0x14: // 16bit Service Solicited UUID
 								solicitedUUIDsInfo.put(uuidStr.substring(4, 8));
 								break;
-							case 0x15:	// 128bit Service Solicited UUID
+							case 0x15: // 128bit Service Solicited UUID
 								solicitedUUIDsInfo.put(uuidStr);
 								break;
-							case 0x1F:	// 32bit Service Solicited UUID
+							case 0x1F: // 32bit Service Solicited UUID
 								solicitedUUIDsInfo.put(uuidStr.substring(0, 8));
 								break;
 						}
 					}
 
 				} else if (structure instanceof ADManufacturerSpecific) {
-					ADManufacturerSpecific ms = (ADManufacturerSpecific)structure;
+					ADManufacturerSpecific ms = (ADManufacturerSpecific) structure;
 
 					if (iOSStyleManufacturerDataIndex == 0) {
-						System.arraycopy(ms.getData(), 0, iOSStyleManufacturerData, iOSStyleManufacturerDataIndex, ms.getData().length);
+						System.arraycopy(ms.getData(), 0, iOSStyleManufacturerData, iOSStyleManufacturerDataIndex,
+								ms.getData().length);
 						iOSStyleManufacturerDataIndex += ms.getData().length;
 					} else {
-						System.arraycopy(ms.getData(), 2, iOSStyleManufacturerData, iOSStyleManufacturerDataIndex, ms.getData().length - 2);
+						System.arraycopy(ms.getData(), 2, iOSStyleManufacturerData, iOSStyleManufacturerDataIndex,
+								ms.getData().length - 2);
 						iOSStyleManufacturerDataIndex += ms.getData().length - 2;
 					}
 				} else if (structure instanceof TxPowerLevel) {
-					TxPowerLevel txPowerLevel = (TxPowerLevel)structure;
+					TxPowerLevel txPowerLevel = (TxPowerLevel) structure;
 					advertisementInfo.put("txPower", txPowerLevel.getLevel());
 				} else if (structure instanceof LocalName) {
-					LocalName localName = (LocalName)structure;
+					LocalName localName = (LocalName) structure;
 					String s = localName.getLocalName();
 					int n = s.indexOf('\0');
 					if (n >= 0) {
@@ -196,7 +210,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				}
 			}
 			if (iOSStyleManufacturerDataIndex > 0) {
-				String b64 = Base64.encodeToString(iOSStyleManufacturerData, 0, iOSStyleManufacturerDataIndex, Base64.NO_WRAP);
+				String b64 = Base64.encodeToString(iOSStyleManufacturerData, 0, iOSStyleManufacturerDataIndex,
+						Base64.NO_WRAP);
 				advertisementInfo.put("data", b64);
 			}
 			if (uuidsInfo.length() > 0) {
@@ -262,19 +277,26 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			Id = device.getAddress();
 		}
 
+		// We supress MissingPermission here since it is checked at the "execute" method
+		@SuppressLint("MissingPermission")
 		public PluginResult connect(CallbackContext callback) {
 			setCallback("connect", callback);
 			Device.connectGatt(_cordova.getActivity().getApplicationContext(), false, this);
-			return null; 	// We will Connect or Fail, nothing to callback with yet
+			return null; // We will Connect or Fail, nothing to callback with yet
 		}
 
+		// We supress MissingPermission here since it is checked at the "execute" method
+		@SuppressLint("MissingPermission")
 		public PluginResult disconnect(CallbackContext callback) {
 			if (_gatt == null) {
 				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
 			}
-			// Note, intentionally re-assign the ConnectCallback to the Disconnect callback (we are already Connected)
-			// If the client deliberately Disconnects the peripheral then we call its Disconnect(success) method
-			// If the peripheral disconnects unexpectedly then we call the Connect(success) method
+			// Note, intentionally re-assign the ConnectCallback to the Disconnect callback
+			// (we are already Connected)
+			// If the client deliberately Disconnects the peripheral then we call its
+			// Disconnect(success) method
+			// If the peripheral disconnects unexpectedly then we call the Connect(success)
+			// method
 			// with "disconnect"
 			setCallback("connect", callback);
 			_gatt.disconnect();
@@ -284,6 +306,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			return null;
 		}
 
+		// We supress MissingPermission here since it is checked at the "execute" method
+		@SuppressLint("MissingPermission")
 		public PluginResult requestMtu(int mtu, CallbackContext callback) {
 			if (_gatt == null) {
 				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
@@ -309,6 +333,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			}
 		}
 
+		// We supress MissingPermission here since it is checked at the "execute" method
+		@SuppressLint("MissingPermission")
 		public PluginResult discoverServices(ArrayList<String> discoverServices, CallbackContext callback) {
 			if (_gatt == null) {
 				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
@@ -321,7 +347,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			return null;
 		}
 
-		public PluginResult discoverServiceCharacteristics(UUID serviceUUID, ArrayList<String> discoverCharacteristics, CallbackContext callback) throws JSONException {
+		public PluginResult discoverServiceCharacteristics(UUID serviceUUID, ArrayList<String> discoverCharacteristics,
+				CallbackContext callback) throws JSONException {
 			if (_gatt == null) {
 				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
 			}
@@ -346,7 +373,10 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			return new PluginResult(PluginResult.Status.OK, jArray);
 		}
 
-		public PluginResult writeCharacteristic(UUID serviceUUID, UUID characteristicUUID, byte[] data, boolean writeWithResponse, CallbackContext callback) {
+		// We supress MissingPermission here since it is checked at the "execute" method
+		@SuppressLint("MissingPermission")
+		public PluginResult writeCharacteristic(UUID serviceUUID, UUID characteristicUUID, byte[] data,
+				boolean writeWithResponse, CallbackContext callback) {
 			if (_gatt == null) {
 				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
 			}
@@ -361,7 +391,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				return new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
 			}
 
-			characteristic.setWriteType(writeWithResponse ? BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT : BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
+			characteristic.setWriteType(writeWithResponse ? BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+					: BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
 			characteristic.setValue(data);
 
 			setCallback("writeCharacteristic:" + characteristicUUID.toString(), callback);
@@ -370,6 +401,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			return null;
 		}
 
+		// We supress MissingPermission here since it is checked at the "execute" method
+		@SuppressLint("MissingPermission")
 		public PluginResult readCharacteristic(UUID serviceUUID, UUID characteristicUUID, CallbackContext callback) {
 			if (_gatt == null) {
 				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
@@ -391,7 +424,10 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			return null;
 		}
 
-		public PluginResult subscribeReadCharacteristic(UUID serviceUUID, UUID characteristicUUID, CallbackContext callback) {
+		// We supress MissingPermission here since it is checked at the "execute" method
+		@SuppressLint("MissingPermission")
+		public PluginResult subscribeReadCharacteristic(UUID serviceUUID, UUID characteristicUUID,
+				CallbackContext callback) {
 			if (_gatt == null) {
 				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
 			}
@@ -408,9 +444,11 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 			setCallback("subscribeReadCharacteristic:" + characteristicUUID.toString(), callback);
 			_gatt.setCharacteristicNotification(characteristic, true);
-			BluetoothGattDescriptor descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIGURATION_DESCRIPTOR_UUID);
+			BluetoothGattDescriptor descriptor = characteristic
+					.getDescriptor(CLIENT_CHARACTERISTIC_CONFIGURATION_DESCRIPTOR_UUID);
 
-			// Simulate what iOS does which is to use Notifications if the characteristic supports it, otherwise use
+			// Simulate what iOS does which is to use Notifications if the characteristic
+			// supports it, otherwise use
 			// Indications instead
 			if ((characteristic.getProperties() & BluetoothGattCharacteristic.PROPERTY_NOTIFY) != 0) {
 				descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
@@ -425,7 +463,10 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			return null;
 		}
 
-		public PluginResult unsubscribeReadCharacteristic(UUID serviceUUID, UUID characteristicUUID, CallbackContext callback) {
+		// We supress MissingPermission here since it is checked at the "execute" method
+		@SuppressLint("MissingPermission")
+		public PluginResult unsubscribeReadCharacteristic(UUID serviceUUID, UUID characteristicUUID,
+				CallbackContext callback) {
 			if (_gatt == null) {
 				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
 			}
@@ -442,7 +483,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 			getCallback("subscribeReadCharacteristic:" + characteristicUUID.toString(), true);
 			_gatt.setCharacteristicNotification(characteristic, false);
-			BluetoothGattDescriptor descriptor = characteristic.getDescriptor(CLIENT_CHARACTERISTIC_CONFIGURATION_DESCRIPTOR_UUID);
+			BluetoothGattDescriptor descriptor = characteristic
+					.getDescriptor(CLIENT_CHARACTERISTIC_CONFIGURATION_DESCRIPTOR_UUID);
 
 			descriptor.setValue(BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE);
 
@@ -463,13 +505,15 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				}
 			} else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
 				// Note, intentionally calling the ConnectCallback for a Disconnect ..
-				// If the client deliberately Disconnects the peripheral then we call its Disconnect(success) method
-				// If the peripheral disconnects unexpectedly then we call the Connect(success) method
+				// If the client deliberately Disconnects the peripheral then we call its
+				// Disconnect(success) method
+				// If the peripheral disconnects unexpectedly then we call the Connect(success)
+				// method
 				// with "disconnect"
 				CallbackContext callback = getCallback("connect", true);
 				if (callback != null) {
 					PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, "disconnect");
-					pluginResult.setKeepCallback(false);		// We can kill the Connect callback now
+					pluginResult.setKeepCallback(false); // We can kill the Connect callback now
 					callback.sendPluginResult(pluginResult);
 				}
 			}
@@ -536,11 +580,12 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 		@Override
 		public void onCharacteristicChanged(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
-			CallbackContext callback = getCallback("subscribeReadCharacteristic:" + characteristic.getUuid().toString(), false);
+			CallbackContext callback = getCallback("subscribeReadCharacteristic:" + characteristic.getUuid().toString(),
+					false);
 			if (callback != null) {
 				byte[] value = characteristic.getValue();
 				PluginResult pluginResult = new PluginResult(PluginResult.Status.OK, value);
-				pluginResult.setKeepCallback(true);			// Keep the callback for more updates
+				pluginResult.setKeepCallback(true); // Keep the callback for more updates
 				callback.sendPluginResult(pluginResult);
 			}
 		}
@@ -564,7 +609,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		public VMScanClient(CordovaInterface cordova, String clientId, BluetoothAdapter bluetoothAdapter) {
 			_cordova = cordova;
 			_adapter = bluetoothAdapter;
-			//scanner = bluetoothAdapter.getBluetoothLeScanner();
+			// scanner = bluetoothAdapter.getBluetoothLeScanner();
 			ClientId = clientId;
 		}
 
@@ -579,6 +624,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			return _scanner;
 		}
 
+		// We supress MissingPermission here since it is checked at the "execute" method
+		@SuppressLint("MissingPermission")
 		public void Dispose() {
 			synchronized (this) {
 				if (_scanner != null) {
@@ -591,7 +638,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				_blacklistedUUIDS = null;
 
 				if (_peripherals != null) {
-					for(VMPeripheral p : _peripherals.values()) {
+					for (VMPeripheral p : _peripherals.values()) {
 						p.dispose();
 					}
 					_peripherals.clear();
@@ -717,6 +764,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			}
 		}
 
+		// We supress MissingPermission here since it is checked at the "execute" method
+		@SuppressLint("MissingPermission")
 		public void startScanning(JSONArray args, CallbackContext callbackContext) throws JSONException {
 			synchronized (this) {
 				this._scanResultCallbackId = callbackContext;
@@ -773,7 +822,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 					}
 				}
 
-				// Stop scan first, harmless if not already scanning but stops startScan from failing if we are already scanning
+				// Stop scan first, harmless if not already scanning but stops startScan from
+				// failing if we are already scanning
 				scanner().stopScan(this);
 
 				scanner().startScan(filters, settings, this);
@@ -785,6 +835,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			}
 		}
 
+		// We supress MissingPermission here since it is checked at the "execute" method
+		@SuppressLint("MissingPermission")
 		public void stopScanning(JSONArray args, CallbackContext callbackContext) {
 			synchronized (this) {
 				// Only stop scanning if we are currently scanning
@@ -935,7 +987,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			}
 		}
 
-		public void serviceDiscoverCharacteristics(JSONArray args, CallbackContext callbackContext) throws JSONException {
+		public void serviceDiscoverCharacteristics(JSONArray args, CallbackContext callbackContext)
+				throws JSONException {
 			String peripheralId = null;
 			UUID serviceUUID = null;
 			ArrayList<String> characteristicUUIDs = null;
@@ -971,7 +1024,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				}
 
 				if (pluginResult == null) {
-					pluginResult = peripheral.discoverServiceCharacteristics(serviceUUID, characteristicUUIDs, callbackContext);
+					pluginResult = peripheral.discoverServiceCharacteristics(serviceUUID, characteristicUUIDs,
+							callbackContext);
 				}
 			}
 
@@ -1012,7 +1066,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
 			}
 			if (characteristicUUID == null) {
-				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
+				pluginResult = new PluginResult(PluginResult.Status.ERROR,
+						"Characteristic UUID has not been discovered");
 			}
 			if (data == null) {
 				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Missing argument 'data'");
@@ -1025,7 +1080,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				}
 
 				if (pluginResult == null) {
-					pluginResult = peripheral.writeCharacteristic(serviceUUID, characteristicUUID, data, writeWithResponse, callbackContext);
+					pluginResult = peripheral.writeCharacteristic(serviceUUID, characteristicUUID, data,
+							writeWithResponse, callbackContext);
 				}
 			}
 
@@ -1057,7 +1113,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
 			}
 			if (characteristicUUID == null) {
-				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
+				pluginResult = new PluginResult(PluginResult.Status.ERROR,
+						"Characteristic UUID has not been discovered");
 			}
 
 			if (pluginResult == null) {
@@ -1099,7 +1156,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
 			}
 			if (characteristicUUID == null) {
-				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
+				pluginResult = new PluginResult(PluginResult.Status.ERROR,
+						"Characteristic UUID has not been discovered");
 			}
 
 			if (pluginResult == null) {
@@ -1109,7 +1167,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				}
 
 				if (pluginResult == null) {
-					pluginResult = peripheral.subscribeReadCharacteristic(serviceUUID, characteristicUUID, callbackContext);
+					pluginResult = peripheral.subscribeReadCharacteristic(serviceUUID, characteristicUUID,
+							callbackContext);
 				}
 			}
 
@@ -1118,7 +1177,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			}
 		}
 
-		public void unsubscribeCharacteristicRead(JSONArray args, CallbackContext callbackContext) throws JSONException {
+		public void unsubscribeCharacteristicRead(JSONArray args, CallbackContext callbackContext)
+				throws JSONException {
 			String peripheralId = null;
 			UUID serviceUUID = null;
 			UUID characteristicUUID = null;
@@ -1141,7 +1201,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Service UUID has not been discovered");
 			}
 			if (characteristicUUID == null) {
-				pluginResult = new PluginResult(PluginResult.Status.ERROR, "Characteristic UUID has not been discovered");
+				pluginResult = new PluginResult(PluginResult.Status.ERROR,
+						"Characteristic UUID has not been discovered");
 			}
 
 			if (pluginResult == null) {
@@ -1151,7 +1212,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 				}
 
 				if (pluginResult == null) {
-					pluginResult = peripheral.unsubscribeReadCharacteristic(serviceUUID, characteristicUUID, callbackContext);
+					pluginResult = peripheral.unsubscribeReadCharacteristic(serviceUUID, characteristicUUID,
+							callbackContext);
 				}
 			}
 
@@ -1166,30 +1228,25 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		super.initialize(cordova, webView);
 
 		final Context context = cordova.getActivity().getApplicationContext();
-		final BluetoothManager bluetoothManager =
-				(BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+		final BluetoothManager bluetoothManager = (BluetoothManager) context
+				.getSystemService(Context.BLUETOOTH_SERVICE);
 
 		_bluetoothAdapter = bluetoothManager.getAdapter();
 
 	}
 
-	private VMScanClient getClientFromCommand(String clientId)
-	{
+	private VMScanClient getClientFromCommand(String clientId) {
 		VMScanClient client = null;
-		if (!_clients.containsKey(clientId))
-		{
+		if (!_clients.containsKey(clientId)) {
 			client = new VMScanClient(this.cordova, clientId, _bluetoothAdapter);
 			_clients.put(clientId, client);
-		}
-		else
-		{
+		} else {
 			client = _clients.get(clientId);
 		}
 		return client;
 	}
 
-	private void deleteClient(String clientId, CallbackContext callbackContext)
-	{
+	private void deleteClient(String clientId, CallbackContext callbackContext) {
 		if (!_clients.containsKey(clientId)) {
 			callbackContext.error("Not found");
 		} else {
@@ -1204,6 +1261,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 		String action;
 		JSONArray args;
 		CallbackContext callbackContext;
+
 		public ExecuteHandler(String action, JSONArray args, CallbackContext callbackContext) {
 			this.action = action;
 			this.args = args;
@@ -1266,17 +1324,18 @@ public class VirtualManagerBLE extends CordovaPlugin {
 	}
 
 	private HashMap<Integer, ExecuteHandler> _executeHandlers = new HashMap<Integer, ExecuteHandler>();
-	private static final int BLUETOOTH_REQUEST_CODE = 300472;
+	private static final int REQUEST_ENABLE_BT = 300472;
 
 	@Override
-	public void onRequestPermissionResult(int requestCode, String[] permissions, int[] grantResults) throws JSONException {
+	public void onRequestPermissionResult(int requestCode, String[] permissions, int[] grantResults)
+			throws JSONException {
 		ExecuteHandler handler = null;
 		synchronized (_executeHandlers) {
 			handler = _executeHandlers.remove(requestCode);
 		}
 		if (handler != null) {
 			String denied = "";
-			for(int i = 0 ; i < permissions.length ; i++) {
+			for (int i = 0; i < permissions.length; i++) {
 				if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
 					if (denied.length() != 0) {
 						denied += ", ";
@@ -1297,7 +1356,8 @@ public class VirtualManagerBLE extends CordovaPlugin {
 
 	@Override
 	public boolean execute(String action, JSONArray args, CallbackContext callbackContext) throws JSONException {
-		// Any action which touches BLUETOOTH permissions will be done through ExecuteHandler to check permissions
+		// Any action which touches BLUETOOTH permissions will be done through
+		// ExecuteHandler to check permissions
 		ExecuteHandler handler = null;
 		if (action.equals("getVersion")) {
 			JSONObject msg = new JSONObject();
@@ -1350,9 +1410,15 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			}
 		}
 		if (handler != null) {
-			int targetVersion = cordova.getContext().getApplicationInfo().targetSdkVersion;
-			if (targetVersion >= 31 && Build.VERSION.SDK_INT >= 31) {
-				if (PermissionHelper.hasPermission(this, "BLUETOOTH_SCAN")) {
+			/*
+			 * if (!_bluetoothAdapter.isEnabled()) {
+			 * Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+			 * startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
+			 * } else {
+			 */ int targetVersion = cordova.getContext().getApplicationInfo().targetSdkVersion;
+			if (targetVersion >= Build.VERSION_CODES.S && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+				if (PermissionHelper.hasPermission(this, BLUETOOTH_SCAN)
+						&& PermissionHelper.hasPermission(this, BLUETOOTH_CONNECT)) {
 					return handler.execute();
 				} else {
 					int requestCode = 0;
@@ -1360,11 +1426,14 @@ public class VirtualManagerBLE extends CordovaPlugin {
 						requestCode = _executeHandlers.size();
 						_executeHandlers.put(requestCode, handler);
 					}
-					PermissionHelper.requestPermission(this, requestCode, "BLUETOOTH_SCAN");
+					PermissionHelper.requestPermissions(this, requestCode,
+							new String[] { BLUETOOTH_SCAN, BLUETOOTH_CONNECT });
+					return true;
 				}
 			} else {
 				return handler.execute();
 			}
+			// }
 		}
 		return false;
 	}
