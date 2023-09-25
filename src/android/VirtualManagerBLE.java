@@ -70,7 +70,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 	private static final String ACCESS_BACKGROUND_LOCATION = "android.permission.ACCESS_BACKGROUND_LOCATION"; // API 29
 	private static final String BLUETOOTH_CONNECT = "android.permission.BLUETOOTH_CONNECT"; // API 31
 	private static final String BLUETOOTH_SCAN = "android.permission.BLUETOOTH_SCAN"; // API 31
-
+	private static final String ACCESS_FINE_LOCATION = "android.permission.ACCESS_FINE_LOCATION"; // API 30
 	private BluetoothAdapter _bluetoothAdapter;
 	private HashMap<String, VMScanClient> _clients = new HashMap<String, VMScanClient>();
 
@@ -1415,10 +1415,24 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			 * Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
 			 * startActivityForResult(enableBtIntent, REQUEST_ENABLE_BT);
 			 * } else {
-			 */ int targetVersion = cordova.getContext().getApplicationInfo().targetSdkVersion;
+			 */
+			ArrayList<String> missingPermissions = new ArrayList<>();
+			int targetVersion = cordova.getContext().getApplicationInfo().targetSdkVersion;
+			if (targetVersion >= Build.VERSION_CODES.R && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+				missingPermissions.add(ACCESS_FINE_LOCATION);
+			}
 			if (targetVersion >= Build.VERSION_CODES.S && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-				if (PermissionHelper.hasPermission(this, BLUETOOTH_SCAN)
-						&& PermissionHelper.hasPermission(this, BLUETOOTH_CONNECT)) {
+				missingPermissions.add(BLUETOOTH_SCAN);
+				missingPermissions.add(BLUETOOTH_CONNECT);
+			}
+			if (missingPermissions.size() > 0) {
+				ArrayList<String> requiredPermissions = new ArrayList<>();
+				for (String permission : missingPermissions) {
+					if (!PermissionHelper.hasPermission(this, permission)) {
+						requiredPermissions.add(permission);
+					}
+				}
+				if (requiredPermissions.size() == 0) {
 					return handler.execute();
 				} else {
 					int requestCode = 0;
@@ -1426,8 +1440,7 @@ public class VirtualManagerBLE extends CordovaPlugin {
 						requestCode = _executeHandlers.size();
 						_executeHandlers.put(requestCode, handler);
 					}
-					PermissionHelper.requestPermissions(this, requestCode,
-							new String[] { BLUETOOTH_SCAN, BLUETOOTH_CONNECT });
+					PermissionHelper.requestPermissions(this, requestCode, requiredPermissions.toArray(new String[0]));
 					return true;
 				}
 			} else {
