@@ -574,8 +574,8 @@ const int firstParameterOffset = 1;
 
         if (pluginResult == nil) {
             // On iOS we can't set the Mtu directly, iOS negotiates this for us but we can retrieve it
-            int mtuResult = [vmp peripheral].maximumWriteValueLength;
-            pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsInt: mtuResult];
+            NSUInteger mtuResult = [[vmp peripheral] maximumWriteValueLengthForType: CBCharacteristicWriteWithResponse];
+            pluginResult = [CDVPluginResult resultWithStatus: CDVCommandStatus_OK messageAsNSUInteger:<#(NSUInteger)#>: mtuResult];
         }
     }
 
