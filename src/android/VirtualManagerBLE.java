@@ -291,17 +291,14 @@ public class VirtualManagerBLE extends CordovaPlugin {
 			if (_gatt == null) {
 				return new PluginResult(PluginResult.Status.ERROR, "Not connected");
 			}
-			// Note, intentionally re-assign the ConnectCallback to the Disconnect callback
-			// (we are already Connected)
-			// If the client deliberately Disconnects the peripheral then we call its
-			// Disconnect(success) method
-			// If the peripheral disconnects unexpectedly then we call the Connect(success)
-			// method
-			// with "disconnect"
-			setCallback("connect", callback);
+			// We can remove the connect callback now
+			getCallback("connect", true);
 			_gatt.disconnect();
 			_gatt.close();
 			_gatt = null;
+
+			// Disconnect success straight away, there is no event for an explicit disconnect
+			callback.success();
 
 			return null;
 		}
