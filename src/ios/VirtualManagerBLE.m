@@ -6,7 +6,7 @@
 //#define DEBUGLOG(fmt, ...) NSLog(fmt, ##__VA_ARGS__)
 #define DEBUGLOG(x, ...)
 
-#define PLUGIN_VERSION @"1.6.0"
+#define PLUGIN_VERSION @"1.7.0"
 
 NSMutableDictionary* getCharacteristicInfo(CBCharacteristic* characteristic)
 {
@@ -101,25 +101,25 @@ NSMutableDictionary* getPeripheralInfo(CBPeripheral* peripheral, NSDictionary* a
     return info;
 }
 
-NSString* getCentralManagerStateName(CBCentralManagerState state)
+NSString* getCentralManagerStateName(CBManagerState state)
 {
     switch(state) {
-        case CBCentralManagerStateUnknown:
+        case CBManagerStateUnknown:
             return @"Unknown";
 
-        case CBCentralManagerStatePoweredOn:
+        case CBManagerStatePoweredOn:
             return @"PoweredOn";
 
-        case CBCentralManagerStateResetting:
+        case CBManagerStateResetting:
             return @"Resetting";
 
-        case CBCentralManagerStatePoweredOff:
+        case CBManagerStatePoweredOff:
             return @"PoweredOff";
 
-        case CBCentralManagerStateUnsupported:
+        case CBManagerStateUnsupported:
             return @"Unsupported";
 
-        case CBCentralManagerStateUnauthorized:
+        case CBManagerStateUnauthorized:
             return @"Unauthorized";
     }
     return @"Invalid State";
@@ -200,7 +200,7 @@ NSString* getCentralManagerStateName(CBCentralManagerState state)
 
 const int firstParameterOffset = 1;
 
--(id)initClientId:(NSString*) theClientId withCommandDelegate:(id<CDVCommandDelegate>)theCommandDelegate
+-(id)initClientId:(NSString*) theClientId withCommandDelegate:(id<CDVCommandDelegate>)theCommandDelegate andOptions:(NSDictionary*)options
 {
     if ((self = [super init])) {
         DEBUGLOG(@"VMScanClient initClientId: %@", theClientId);
@@ -216,6 +216,20 @@ const int firstParameterOffset = 1;
         _groupTimeoutScheduled = false;
 
         self.scanArgs = nil;
+
+        // Note, by default we enable BLE now for backwards compatability, but this can be overridden by the client
+        NSNumber* enableBleNow = nil;
+        if (options != nil) {
+            enableBleNow = [options valueForKey:@"enableBleNow"];
+        } 
+
+        if (enableBleNow == nil) {
+            enableBleNow = [NSNumber numberWithBool:YES];
+        }
+
+        if ([enableBleNow boolValue]) {
+            [self centralManager];
+        }
     }
     return self;
 }
@@ -258,6 +272,18 @@ const int firstParameterOffset = 1;
 {
     DEBUGLOG(@"unsubscribeStageChange %@", clientId);
     self.stateChangeCallbackId = nil;
+}
+
+-(void)enableBle:(CDVInvokedUrlCommand*) command
+{
+    DEBUGLOG(@"enableBle %@ ", clientId);
+    [self centralManager];
+}
+
+-(void)disableBle:(CDVInvokedUrlCommand*) command
+{
+    DEBUGLOG(@"disableBle %@ ", clientId);
+    self._centralManager = nil;
 }
 
 -(NSArray*)getUUIDsFromStringArray:(NSArray*)uuidStrArray
@@ -363,7 +389,7 @@ const int firstParameterOffset = 1;
 
 - (void)centralManagerDidUpdateState:(CBCentralManager *)central
 {
-    NSString* state = getCentralManagerStateName((CBCentralManagerState)central.state);
+    NSString* state = getCentralManagerStateName((CBManagerState)central.state);
     DEBUGLOG(@"VMScanClient:%@ Central Manager Update State %@", clientId, state);
 
     if (stateChangeCallbackId != nil) {
@@ -1133,10 +1159,39 @@ const int firstParameterOffset = 1;
     // Find or create a new client ..
     VMScanClient* client = [_clients objectForKey:clientId];
     if (client == nil) {
-        client = [[VMScanClient alloc] initClientId: clientId withCommandDelegate: self.commandDelegate];
+        client = [[VMScanClient alloc] initClientId: clientId withCommandDelegate: self.commandDelegate andOptions: nil];
         [_clients setObject:client forKey:clientId];
     }
     return client;
+}
+
+-(void)createClient:(CDVInvokedUrlCommand*) command
+{
+    CDVPluginResult* pluginResult = nil;
+
+    // 1st parameter will be the clientId
+    NSString* clientId = nil;
+    if (command.arguments.count >= 1) {
+        clientId = [command.arguments objectAtIndex:0];
+    }
+
+    NSDictionary* options = nil;
+    if (command.arguments.count >= 2) {
+        options = [command.arguments objectAtIndex:1];
+    }
+
+    // Only create a new client if it doesn't already exist
+    VMScanClient* client = [_clients objectForKey:clientId];
+    if (client == nil) {
+        client = [[VMScanClient alloc] initClientId: clientId withCommandDelegate: self.commandDelegate andOptions: options];
+        [_clients setObject:client forKey:clientId];
+
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_OK];
+    } else {
+        pluginResult = [CDVPluginResult resultWithStatus:CDVCommandStatus_ERROR messageAsString: @"Already exists"];
+    }
+
+    [self.commandDelegate sendPluginResult: pluginResult callbackId: command.callbackId];    
 }
 
 -(void)deleteClient:(CDVInvokedUrlCommand*) command
@@ -1162,14 +1217,26 @@ const int firstParameterOffset = 1;
 -(void)clientSubscribeStateChange:(CDVInvokedUrlCommand*) command
 {
     VMScanClient* client = [self getClientFromCommand:command];
-        [client subscribeStateChange:command];
-    }
+    [client subscribeStateChange:command];
+}
 
 -(void)clientUnsubscribeStateChange:(CDVInvokedUrlCommand*) command
 {
     VMScanClient* client = [self getClientFromCommand:command];
-        [client unsubscribeStateChange:command];
-    }
+    [client unsubscribeStateChange:command];
+}
+
+-(void)clientEnableBle:(CDVInvokedUrlCommand*) command
+{
+    VMScanClient* client = [self getClientFromCommand:command];
+    [client enableBle:command];
+}
+
+-(void)clientDisableBle:(CDVInvokedUrlCommand*) command
+{
+    VMScanClient* client = [self getClientFromCommand:command];
+    [client disableBle:command];
+}
 
 -(void)clientStartScanning:(CDVInvokedUrlCommand*) command
 {
@@ -1181,7 +1248,7 @@ const int firstParameterOffset = 1;
 {
     VMScanClient* client = [self getClientFromCommand:command];
     [client stopScanning:command];
-    }
+}
 
 -(void)clientBlacklistUUIDs:(CDVInvokedUrlCommand*) command
 {

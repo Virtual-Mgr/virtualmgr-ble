@@ -209,7 +209,8 @@ function Client(id, options) {
 	this.options = Object.assign({
 		keepPeripherals: false,
 		makePeripherals: false,
-		deleteExistingClient: false
+		deleteExistingClient: false,
+		enableBleNow: true
 	}, options);
 	this.supports = exports.supports;
 
@@ -238,6 +239,8 @@ function Client(id, options) {
 			return sr;
 		};
 	}
+
+	exec(null, null, _module, "createClient", [this.id, this.options]);
 }
 
 Client.prototype.startScanning = function (serviceUUIDs, options, success, error) {
@@ -262,6 +265,14 @@ Client.prototype.subscribeStateChange = function (success, error) {
 
 Client.prototype.unsubscribeStateChange = function (success, error) {
 	exec(success, error, _module, "clientUnsubscribeStateChange", [this.id]);
+}
+
+Client.prototype.enableBle = function (enable, success, error) {
+	if (!!enable) {
+		exec(success, error, _module, "clientEnableBle", [this.id]);
+	} else {
+		exec(success, error, _module, "clientDisableBle", [this.id]);
+	}
 }
 
 Client.prototype.blacklist = function (peripherals, success, error) {
